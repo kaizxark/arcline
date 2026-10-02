@@ -2,20 +2,18 @@
 import { program } from 'commander';
 import { configManager } from '../config/index.js';
 import { providerRegistry } from '../providers/index.js';
-import { createSession } from '../session/index.js';
 import { tui, TUI } from '../ui/tui.js';
-import type { ProviderConfig, Message, ToolResult } from '../core/types.js';
-import type { ToolDefinition } from '../tools/types.js';
+import type { ProviderConfig } from '../core/types.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { readFileSync, existsSync, readFileSync as fsReadFileSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, readdirSync } from 'node:fs';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { createAgent, AgentOrchestrator } from '../agent/index.js';
 import { toolRegistry } from '../tools/registry.js';
 import { permissionManager } from '../tools/permissions.js';
 import { contextManager } from '../agent/context.js';
-import type { ToolDefinition as ToolDefType } from '../tools/types.js';
+import type { ToolDefinition } from '../tools/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -39,239 +37,10 @@ async function loadProviderConfig(): Promise<ProviderConfig | null> {
   const envModel = process.env['ARCLINE_MODEL'];
 
   if (envBaseUrl && envApiKey && envModel) {
-    return {
-      baseUrl: envBaseUrl,
-      apiKey: envApiKey,
-      model: envModel,
-    };
+    return { baseUrl: envBaseUrl, apiKey: envApiKey, model: envModel };
   }
 
   return null;
-}
-
-async function selectModel(config: ProviderConfig): Promise<string> {
-  process.stdout.write('\x1b[?25l');
-  try {
-    const models = await providerRegistry.listModels(config);
-    
-    if (models.length === 0) {
-      const { modelId } = await inquirer.prompt([{
-        type: 'input',
-        name: 'modelId',
-        message: 'Model ID:',
-        default: config.model,
-        validate: (input) => input.trim() ? true : 'Model ID is required',
-      }]);
-      return modelId.trim();
-    }
-
-    const choices = models.map(m => ({
-      name: `${m.id}${m.name ? `  ${chalk.dim(`(${m.name})`)}` : ''}${m.id === config.model ? `  ${chalk.green('← current')}` : ''}`,
-      value: m.id,
-      short: m.id,
-    }));
-
-    choices.unshift({
-      name: chalk.italic('Enter custom model ID...'),
-      value: '__custom__',
-      short: 'Custom',
-    });
-
-    console.log(chalk.bold('\n  Select a model:'));
-    console.log();
-
-    const { modelId } = await inquirer.prompt([{
-      type: 'list',
-      name: 'modelId',
-      message: '',
-      choices,
-      pageSize: 15,
-      loop: false,
-    }]);
-
-    if (modelId === '__custom__') {
-      const { customModel } = await inquirer.prompt([{
-        type: 'input',
-        name: 'customModel',
-        message: 'Model ID:',
-        default: config.model,
-        validate: (input) => input.trim() ? true : 'Model ID is required',
-      }]);
-      return customModel.trim();
-    }
-
-    return modelId;
-  } catch (error) {
-    if (error instanceof Error) {
-      console.log(chalk.red('\n✖ ') + error.message);
-    }
-    const { modelId } = await inquirer.prompt([{
-      type: 'input',
-      name: 'modelId',
-      message: 'Model ID:',
-      default: config.model,
-      validate: (input) => input.trim() ? true : 'Model ID is required',
-    }]);
-    return modelId.trim();
-  } finally {
-    process.stdout.write('\x1b[?25h');
-  }
-}
-
-function handleKeypress(key: Buffer | string, tuiInstance: TUI, session: ReturnType<typeof createSession>, config: ProviderConfig): Promise<{ shouldExit: boolean; shouldContinue: boolean }> {
-  const keyStr = key.toString();
-  
-  if (keyStr === '\u0003') {
-    return Promise.resolve({ shouldExit: true, shouldContinue: false });
-  }
-  
-  if (keyStr === '\r' || keyStr === '\n') {
-    const input = tuiInstance.getInputBuffer().trim();
-    tuiInstance.clearInputBuffer();
-    
-    if (!input) {
-      return Promise.resolve({ shouldExit: false, shouldContinue: true });
-    }
-    
-    if (input === '/exit' || input === '/quit') {
-      return Promise.resolve({ shouldExit: true, shouldContinue: false });
-    }
-    
-    if (input === '/clear') {
-      session.clear();
-      tuiInstance.clearMessages();
-      tuiInstance.printSuccess('Conversation cleared');
-      return Promise.resolve({ shouldExit: false, shouldContinue: true });
-    }
-    
-    if (input === '/help') {
-      tuiInstance.printSessionHelp();
-      return Promise.resolve({ shouldExit: false, shouldContinue: true });
-    }
-    
-    if (input === '/model') {
-      return handleModelSwitch(tuiInstance, session, config);
-    }
-    
-    if (input === '/config') {
-      return handleConfig(tuiInstance, session, config);
-    }
-    
-    return handleUserMessage(input, tuiInstance, session);
-  }
-  
-  if (keyStr === '\u007f' || keyStr === '\b') {
-    tuiInstance.deleteChar();
-    return Promise.resolve({ shouldExit: false, shouldContinue: true });
-  }
-  
-  if (keyStr === '\u001b[D' || keyStr === '\u001bOD') {
-    tuiInstance.moveCursorLeft();
-    return Promise.resolve({ shouldExit: false, shouldContinue: true });
-  }
-  
-  if (keyStr === '\u001b[C' || keyStr === '\u001bOC') {
-    tuiInstance.moveCursorRight();
-    return Promise.resolve({ shouldExit: false, shouldContinue: true });
-  }
-  
-  if (keyStr === '\u001b[H' || keyStr === '\u001bOH') {
-    tuiInstance.moveCursorHome();
-    return Promise.resolve({ shouldExit: false, shouldContinue: true });
-  }
-  
-  if (keyStr === '\u001b[F' || keyStr === '\u001bOF') {
-    tuiInstance.moveCursorEnd();
-    return Promise.resolve({ shouldExit: false, shouldContinue: true });
-  }
-  
-  if (keyStr === '\u001b[3~') {
-    tuiInstance.deleteCharForward();
-    return Promise.resolve({ shouldExit: false, shouldContinue: true });
-  }
-  
-  if (keyStr === '\u001b[A' || keyStr === '\u001bOA') {
-    tuiInstance.scrollUp();
-    return Promise.resolve({ shouldExit: false, shouldContinue: true });
-  }
-  
-  if (keyStr === '\u001b[B' || keyStr === '\u001bOB') {
-    tuiInstance.scrollDown();
-    return Promise.resolve({ shouldExit: false, shouldContinue: true });
-  }
-  
-  if (keyStr.length === 1 && keyStr >= ' ' && keyStr <= '~') {
-    tuiInstance.insertChar(keyStr);
-    return Promise.resolve({ shouldExit: false, shouldContinue: true });
-  }
-  
-  return Promise.resolve({ shouldExit: false, shouldContinue: true });
-}
-
-async function handleModelSwitch(tuiInstance: TUI, session: ReturnType<typeof createSession>, config: ProviderConfig): Promise<{ shouldExit: boolean; shouldContinue: boolean }> {
-  tuiInstance.disableRawMode();
-  try {
-    const newModel = await selectModel(config);
-    config.model = newModel;
-    configManager.setProvider(configManager.getConfig().activeProvider || 'default', config);
-    session.updateConfig({ provider: config });
-    tuiInstance.printSuccess(`Switched to model: ${newModel}`);
-    tuiInstance.setProviderInfo('OpenAI Compatible', newModel, config.baseUrl);
-  } catch (error) {
-    if (error instanceof Error) {
-      tuiInstance.printError(error.message);
-    }
-  }
-  tuiInstance.enableRawMode();
-  tuiInstance.render();
-  return { shouldExit: false, shouldContinue: true };
-}
-
-async function handleConfig(tuiInstance: TUI, session: ReturnType<typeof createSession>, config: ProviderConfig): Promise<{ shouldExit: boolean; shouldContinue: boolean }> {
-  tuiInstance.disableRawMode();
-  try {
-    await configureProvider();
-    const newConfig = await loadProviderConfig();
-    if (newConfig) {
-      config.baseUrl = newConfig.baseUrl;
-      config.apiKey = newConfig.apiKey;
-      config.model = newConfig.model;
-      session.updateConfig({ provider: config });
-      tuiInstance.setProviderInfo('OpenAI Compatible', config.model, config.baseUrl);
-      tuiInstance.clearMessages();
-      tuiInstance.printIntro();
-    }
-  } catch (error) {
-    if (error instanceof Error) {
-      tuiInstance.printError(error.message);
-    }
-  }
-  tuiInstance.enableRawMode();
-  tuiInstance.render();
-  return { shouldExit: false, shouldContinue: true };
-}
-
-async function handleUserMessage(input: string, tuiInstance: TUI, session: ReturnType<typeof createSession>): Promise<{ shouldExit: boolean; shouldContinue: boolean }> {
-  tuiInstance.addMessage({ role: 'user', content: input });
-  
-  try {
-    tuiInstance.addMessage({ role: 'assistant', content: '', isStreaming: true });
-    
-    let fullContent = '';
-    for await (const chunk of await session.sendMessage(input, { stream: true })) {
-      fullContent += chunk;
-      tuiInstance.updateLastMessage(fullContent, true);
-    }
-    
-    tuiInstance.updateLastMessage(fullContent, false);
-  } catch (error) {
-    tuiInstance.updateLastMessage('', false);
-    if (error instanceof Error) {
-      tuiInstance.printError(error.message);
-    }
-  }
-  
-  return { shouldExit: false, shouldContinue: true };
 }
 
 function findProjectRoot(startPath: string): string {
@@ -320,7 +89,7 @@ function resolveFileReferences(refs: string[], projectRoot: string): Map<string,
     const matches = files.filter(f => f.includes(ref) || f.endsWith(ref));
     if (matches.length === 1 && matches[0]) {
       try {
-        const content = fsReadFileSync(join(projectRoot, matches[0]), 'utf-8');
+        const content = readFileSync(join(projectRoot, matches[0]), 'utf-8');
         resolved.set(ref, content);
       } catch {}
     }
@@ -328,263 +97,100 @@ function resolveFileReferences(refs: string[], projectRoot: string): Map<string,
   return resolved;
 }
 
-async function handleSlashCommand(input: string, agent: AgentOrchestrator, config: ProviderConfig): Promise<{ handled: boolean; shouldExit: boolean }> {
-  const parts = input.slice(1).split(' ');
-  const cmd = parts[0];
-  const args = parts.slice(1).join(' ');
-
-  switch (cmd) {
-    case 'exit':
-    case 'quit':
-      return { handled: true, shouldExit: true };
-    
-    case 'clear':
-      agent.clearMessages();
-      tui.clearMessages();
-      tui.printSuccess('Conversation cleared');
-      return { handled: true, shouldExit: false };
-    
-    case 'help':
-      tui.printSessionHelp();
-      return { handled: true, shouldExit: false };
-    
-    case 'model':
-      tui.disableRawMode();
-      try {
-        const newModel = await selectModel(config);
-        config.model = newModel;
-        configManager.setProvider(configManager.getConfig().activeProvider || 'default', config);
-        tui.printSuccess(`Switched to model: ${newModel}`);
-        tui.setProviderInfo('OpenAI Compatible', newModel, config.baseUrl);
-      } catch (error) {
-        if (error instanceof Error) tui.printError(error.message);
-      }
-      tui.enableRawMode();
-      tui.render();
-      return { handled: true, shouldExit: false };
-    
-    case 'config':
-      tui.disableRawMode();
-      try {
-        await configureProvider();
-        const newConfig = await loadProviderConfig();
-        if (newConfig) {
-          config.baseUrl = newConfig.baseUrl;
-          config.apiKey = newConfig.apiKey;
-          config.model = newConfig.model;
-          tui.setProviderInfo('OpenAI Compatible', config.model, config.baseUrl);
-          tui.clearMessages();
-          tui.printIntro();
-        }
-      } catch (error) {
-        if (error instanceof Error) tui.printError(error.message);
-      }
-      tui.enableRawMode();
-      tui.render();
-      return { handled: true, shouldExit: false };
-    
-    case 'plan':
-      if (!args) {
-        tui.printError('Usage: /plan <task description>');
-      } else {
-        const plan = agent.createPlan(args, []);
-        tui.printSuccess(`Created plan: ${plan.title}`);
-        for (const step of plan.steps) {
-          tui.printInfo(`  ${step.id}: ${step.description}`);
-        }
-      }
-      return { handled: true, shouldExit: false };
-    
-    case 'permissions':
-      tui.disableRawMode();
-      try {
-        const mode = permissionManager.getMode();
-        const { newMode } = await inquirer.prompt([{
-          type: 'list',
-          name: 'newMode',
-          message: `Current mode: ${mode}. Select new mode:`,
-          choices: ['ask', 'allow', 'deny'],
-        }]);
-        permissionManager.setMode(newMode as 'ask' | 'allow' | 'deny');
-        tui.printSuccess(`Permission mode set to: ${newMode}`);
-      } catch (error) {
-        if (error instanceof Error) tui.printError(error.message);
-      }
-      tui.enableRawMode();
-      tui.render();
-      return { handled: true, shouldExit: false };
-    
-    case 'cost':
-      const usage = agent.getState().contextUsage;
-      tui.printInfo(`Session tokens: ${usage.totalTokens} / ${usage.maxTokens} (${Math.round(usage.percentage * 100)}%)`);
-      return { handled: true, shouldExit: false };
-    
-    case 'compact':
-      tui.printInfo('Compacting conversation...');
-      return { handled: true, shouldExit: false };
-    
-    case 'resume':
-      tui.disableRawMode();
-      try {
-        const sessions = contextManager.listSessions();
-        if (sessions.length === 0) {
-          tui.printInfo('No previous sessions found');
-        } else {
-          const { sessionId } = await inquirer.prompt([{
-            type: 'list',
-            name: 'sessionId',
-            message: 'Select session to resume:',
-            choices: sessions.map(s => ({
-              name: `${s.id} (${s.messageCount} messages, ${new Date(s.updatedAt).toLocaleString()})`,
-              value: s.id,
-            })),
-          }]);
-          const session = contextManager.loadSession(sessionId);
-          if (session) {
-            contextManager.setCurrentSession(session);
-            tui.printSuccess(`Resumed session: ${sessionId}`);
-          }
-        }
-      } catch (error) {
-        if (error instanceof Error) tui.printError(error.message);
-      }
-      tui.enableRawMode();
-      tui.render();
-      return { handled: true, shouldExit: false };
-    
-    case 'init':
-      tui.disableRawMode();
-      try {
-        const projectRoot = findProjectRoot(process.cwd());
-        const arclineMd = join(projectRoot, 'ARCLINE.md');
-        if (existsSync(arclineMd)) {
-          tui.printInfo('ARCLINE.md already exists');
-        } else {
-          const template = `# Project Instructions
-
-## Overview
-Describe your project here.
-
-## Coding Standards
-- Language: TypeScript
-- Style: ESLint + Prettier
-- Testing: Vitest
-
-## Commands
-- Build: npm run build
-- Test: npm run test
-- Lint: npm run lint
-
-## Notes
-Add any project-specific instructions here.`;
-          fsWriteFileSync(arclineMd, template);
-          tui.printSuccess('Created ARCLINE.md');
-        }
-      } catch (error) {
-        if (error instanceof Error) tui.printError(error.message);
-      }
-      tui.enableRawMode();
-      tui.render();
-      return { handled: true, shouldExit: false };
-    
-    default:
-      return { handled: false, shouldExit: false };
-  }
-}
-
-import { readdirSync, writeFileSync as fsWriteFileSync } from 'node:fs';
-
-async function runInteractiveSession(config: ProviderConfig): Promise<void> {
-  const model = await selectModel(config);
-  config.model = model;
-  configManager.setProvider(configManager.getConfig().activeProvider || 'default', config);
-
-  tui.setProviderInfo('OpenAI Compatible', model, config.baseUrl);
-  tui.printIntro();
-
-  // Check for updates in background
-  tui.checkForUpdates(getVersion()).catch(() => {});
-
+async function runInteractiveSession(): Promise<void> {
   const projectRoot = findProjectRoot(process.cwd());
   contextManager.loadProjectInstructions();
 
+  // Load or create provider config
+  let config = await loadProviderConfig();
+  if (!config) {
+    // No provider configured - show config prompt in TUI
+    tui.printIntro();
+    tui.addMessage({ role: 'system', content: chalk.yellow('No provider configured. Use /config to set up.') });
+    tui.render();
+  } else {
+    // Check for updates in background
+    tui.checkForUpdates(getVersion()).catch(() => {});
+  }
+
   const toolDefs = toolRegistry.getDefinitions();
   
-  const agent = createAgent({
-    config: {
-      providerConfig: config,
-      systemPrompt: 'You are a helpful AI coding assistant. Use tools to read, write, and edit files. Execute commands to test your changes.',
-      model: config.model,
-      temperature: 0.2,
-      maxTokens: 8000,
-      maxToolCalls: 20,
-      maxIterations: 10,
-      enablePlanMode: true,
-      autoApproveTools: [],
-    },
-    callbacks: {
-      message: (msg) => {
-        if (msg.role === 'user') {
-          tui.addMessage(msg);
-        } else if (msg.role === 'assistant') {
-          tui.addMessage({ ...msg, isStreaming: true });
-        } else if (msg.role === 'tool') {
-        }
+  let agent: AgentOrchestrator | null = null;
+  let shouldExit = false;
+  
+  function createAgentInstance(cfg: ProviderConfig) {
+    return createAgent({
+      config: {
+        providerConfig: cfg,
+        systemPrompt: 'You are a helpful AI coding assistant. Use tools to read, write, and edit files. Execute commands to test your changes.',
+        model: cfg.model,
+        temperature: 0.2,
+        maxTokens: 8000,
+        maxToolCalls: 20,
+        maxIterations: 10,
+        enablePlanMode: true,
+        autoApproveTools: [],
       },
-      tool_call: (tc) => tui.addMessage({ role: 'system', content: chalk.cyan(`▸ ${tc.function.name}`), isStreaming: true }),
-      tool_result: (result) => {
-        tui.addMessage({ role: 'tool', content: JSON.stringify(result.output), toolCallId: result.callId });
+      callbacks: {
+        message: (msg) => {
+          if (msg.role === 'user') {
+            tui.addMessage(msg);
+          } else if (msg.role === 'assistant') {
+            tui.addMessage({ ...msg, isStreaming: true });
+          }
+        },
+        tool_call: (tc) => tui.addMessage({ role: 'system', content: chalk.cyan(`▸ ${tc.function.name}`), isStreaming: true }),
+        tool_result: (result) => {
+          if (result.isError) {
+            tui.addMessage({ role: 'system', content: chalk.red(`Error: ${result.error}`) });
+          } else if (result.output) {
+            tui.addMessage({ role: 'tool', content: JSON.stringify(result.output), toolCallId: result.callId });
+          }
+        },
+        tool_progress: (name, progress) => {
+          if (progress.stage === 'completed') {
+            tui.printSuccess(`${name} completed`);
+          } else if (progress.stage === 'failed') {
+            tui.printError(`${name} failed: ${progress.message}`);
+          }
+        },
+        plan_update: (plan) => tui.printInfo(`Plan: ${plan.title}`),
+        context_update: (usage) => {
+          if (usage.percentage > 0.8) {
+            tui.printWarning(`Context: ${Math.round(usage.percentage * 100)}%`);
+          }
+        },
+        error: (err) => tui.printError(err.message),
+        complete: (final) => tui.addMessage({ role: 'assistant', content: final, isStreaming: false }),
+        permission_request: async (req) => {
+          return await tui.requestPermission(req.toolName, req.description, req.category);
+        },
       },
-      tool_progress: (name, progress) => {
-        if (progress.stage === 'starting') {
-          tui.addMessage({ role: 'system', content: chalk.dim(`  ${name}: ${progress.message}`) });
-        } else if (progress.stage === 'completed') {
-          tui.printSuccess(`${name} completed`);
-        } else if (progress.stage === 'failed') {
-          tui.printError(`${name} failed: ${progress.message}`);
-        }
+      tools: toolDefs,
+      toolContext: {
+        workingDirectory: projectRoot,
+        sessionId: `session-${Date.now()}`,
+        permissions: permissionManager.getState(),
       },
-      plan_update: (plan) => {
-        tui.printInfo(`Plan updated: ${plan.title}`);
-      },
-      context_update: (usage) => {
-        if (usage.percentage > 0.8) {
-          tui.printInfo(`Context usage: ${Math.round(usage.percentage * 100)}%`);
-        }
-      },
-      error: (err) => tui.printError(err.message),
-      complete: (final) => tui.addMessage({ role: 'assistant', content: final, isStreaming: false }),
-      permission_request: async (req) => {
-        tui.disableRawMode();
-        const { decision } = await inquirer.prompt([{
-          type: 'list',
-          name: 'decision',
-          message: `Allow ${req.toolName}? ${req.description}`,
-          choices: ['allow_once', 'allow_session', 'deny'],
-        }]);
-        tui.enableRawMode();
-        tui.render();
-        return decision as 'allow_once' | 'allow_session' | 'deny' | 'cancel';
-      },
-    },
-    tools: toolDefs,
-    toolContext: {
-      workingDirectory: projectRoot,
-      sessionId: `session-${Date.now()}`,
-      permissions: permissionManager.getState(),
-    },
-  });
+    });
+  }
+
+  // Initialize agent if config exists
+  if (config) {
+    agent = createAgentInstance(config);
+  }
 
   tui.enableRawMode();
   tui.render();
 
-  let shouldExit = false;
-  
+  // Initial home screen
+  tui.printIntro();
+
   process.stdin.on('data', async (key) => {
     if (shouldExit) return;
     const keyStr = key.toString();
     
-    if (keyStr === '\u0003') {
+    if (keyStr === '\u0003') { // Ctrl+C
       shouldExit = true;
       tui.cleanup();
       process.exit(0);
@@ -598,17 +204,13 @@ async function runInteractiveSession(config: ProviderConfig): Promise<void> {
       if (!input) return;
       
       if (input.startsWith('/')) {
-        const result = await handleSlashCommand(input, agent, config);
-        if (result.shouldExit) {
-          shouldExit = true;
-          tui.cleanup();
-          process.exit(0);
-        }
+        await handleSlashCommand(input, agent, config);
         return;
       }
       
       tui.addToHistory(input);
       
+      // Handle @file references
       const fileRefs = extractFileReferences(input);
       if (fileRefs.length > 0) {
         const refContent = resolveFileReferences(fileRefs, projectRoot);
@@ -618,56 +220,33 @@ async function runInteractiveSession(config: ProviderConfig): Promise<void> {
       }
       
       tui.addMessage({ role: 'user', content: input });
-      agent.addMessage({ role: 'user', content: input });
       
-      try {
-        await agent.run(input);
-      } catch (error) {
-        if (error instanceof Error) tui.printError(error.message);
+      if (!agent && config) {
+        agent = createAgentInstance(config);
+      }
+      
+      if (agent) {
+        try {
+          await agent.run(input);
+        } catch (error) {
+          if (error instanceof Error) tui.printError(error.message);
+        }
+      } else if (!config) {
+        tui.printError('No provider configured. Use /config to set up.');
       }
       
       return;
     }
     
-    if (keyStr === '\u007f' || keyStr === '\b') {
-      tui.deleteChar();
-      return;
-    }
-    
-    if (keyStr === '\u001b[D' || keyStr === '\u001bOD') {
-      tui.moveCursorLeft();
-      return;
-    }
-    
-    if (keyStr === '\u001b[C' || keyStr === '\u001bOC') {
-      tui.moveCursorRight();
-      return;
-    }
-    
-    if (keyStr === '\u001b[H' || keyStr === '\u001bOH') {
-      tui.moveCursorHome();
-      return;
-    }
-    
-    if (keyStr === '\u001b[F' || keyStr === '\u001bOF') {
-      tui.moveCursorEnd();
-      return;
-    }
-    
-    if (keyStr === '\u001b[3~') {
-      tui.deleteCharForward();
-      return;
-    }
-    
-    if (keyStr === '\u001b[A' || keyStr === '\u001bOA') {
-      tui.scrollUp();
-      return;
-    }
-    
-    if (keyStr === '\u001b[B' || keyStr === '\u001bOB') {
-      tui.scrollDown();
-      return;
-    }
+    // Handle keyboard input
+    if (keyStr === '\u007f' || keyStr === '\b') { tui.deleteChar(); return; }
+    if (keyStr === '\u001b[D' || keyStr === '\u001bOD') { tui.moveCursorLeft(); return; }
+    if (keyStr === '\u001b[C' || keyStr === '\u001bOC') { tui.moveCursorRight(); return; }
+    if (keyStr === '\u001b[H' || keyStr === '\u001bOH') { tui.moveCursorHome(); return; }
+    if (keyStr === '\u001b[F' || keyStr === '\u001bOF') { tui.moveCursorEnd(); return; }
+    if (keyStr === '\u001b[3~') { tui.deleteCharForward(); return; }
+    if (keyStr === '\u001b[A' || keyStr === '\u001bOA') { tui.scrollUp(); return; }
+    if (keyStr === '\u001b[B' || keyStr === '\u001bOB') { tui.scrollDown(); return; }
     
     if (keyStr.length === 1 && keyStr >= ' ' && keyStr <= '~') {
       tui.insertChar(keyStr);
@@ -677,7 +256,7 @@ async function runInteractiveSession(config: ProviderConfig): Promise<void> {
       const currentWord = buffer.slice(lastSpace + 1);
       
       if (currentWord.startsWith('/') && currentWord.length > 1) {
-        const commands = ['/exit', '/quit', '/clear', '/help', '/model', '/config', '/plan', '/permissions', '/cost', '/compact', '/resume', '/init'];
+        const commands = ['/exit', '/quit', '/clear', '/help', '/model', '/config', '/plan', '/permissions', '/cost', '/compact', '/resume', '/init', '/update'];
         const matches = commands.filter(c => c.startsWith(currentWord));
         if (matches.length > 0) {
           tui.showAutocomplete(matches.map(c => ({ label: c, value: c, type: 'command' })), currentWord);
@@ -697,20 +276,179 @@ async function runInteractiveSession(config: ProviderConfig): Promise<void> {
     tui.hideAutocomplete();
   });
 
-  process.on('SIGINT', () => {
-    tui.cleanup();
-    process.exit(0);
-  });
-
-  process.on('SIGTERM', () => {
-    tui.cleanup();
-    process.exit(0);
-  });
+  process.on('SIGINT', () => { tui.cleanup(); process.exit(0); });
+  process.on('SIGTERM', () => { tui.cleanup(); process.exit(0); });
 
   await new Promise<void>(() => {});
 }
 
-async function configureProvider(): Promise<void> {
+async function handleSlashCommand(input: string, agent: AgentOrchestrator | null, config: ProviderConfig | null): Promise<void> {
+  const parts = input.slice(1).split(' ');
+  const cmd = parts[0]?.toLowerCase() ?? '';
+  const args = parts.slice(1).join(' ');
+
+  if (!cmd) return;
+
+  if (!config && !['config', 'update', 'help', 'exit', 'quit'].includes(cmd)) {
+    tui.printError('No provider configured. Use /config to set up.');
+    return;
+  }
+
+  switch (cmd) {
+    case 'exit':
+    case 'quit':
+      tui.cleanup();
+      process.exit(0);
+    
+    case 'clear':
+      if (agent) agent.clearMessages();
+      tui.clearMessages();
+      tui.printSuccess('Conversation cleared');
+      return;
+    
+    case 'help':
+      tui.printSessionHelp();
+      return;
+    
+    case 'model': {
+      if (!config) { tui.printError('No provider configured'); return; }
+      tui.disableRawMode();
+      try {
+        const newModel = await selectModel(config);
+        config.model = newModel;
+        configManager.setProvider(configManager.getConfig().activeProvider || 'default', config);
+        if (agent) agent.updateConfig({ providerConfig: config });
+        tui.setProviderInfo('OpenAI Compatible', newModel, config.baseUrl);
+        tui.printSuccess(`Model: ${newModel}`);
+      } catch (error) {
+        if (error instanceof Error) tui.printError(error.message);
+      }
+      tui.enableRawMode();
+      tui.render();
+      return;
+    }
+    
+    case 'config': {
+      tui.disableRawMode();
+      try {
+        await configureProviderInteractive();
+        const newConfig = await loadProviderConfig();
+        if (newConfig) {
+          config = newConfig;
+          if (agent) agent.updateConfig({ providerConfig: config });
+          tui.setProviderInfo('OpenAI Compatible', config.model, config.baseUrl);
+          tui.clearMessages();
+          tui.printIntro();
+          tui.printSuccess('Provider configured');
+        }
+      } catch (error) {
+        if (error instanceof Error) tui.printError(error.message);
+      }
+      tui.enableRawMode();
+      tui.render();
+      return;
+    }
+    
+    case 'plan':
+      if (!args) { tui.printError('Usage: /plan <task>'); }
+      else if (agent) {
+        const plan = agent.createPlan(args, []);
+        tui.printSuccess(`Plan: ${plan.title}`);
+        for (const step of plan.steps) tui.printInfo(`  ${step.id}: ${step.description}`);
+      }
+      return;
+    
+    case 'permissions': {
+      tui.disableRawMode();
+      try {
+        const mode = permissionManager.getMode();
+        const { newMode } = await inquirer.prompt([{
+          type: 'list', name: 'newMode',
+          message: `Permission mode (${mode}):`,
+          choices: ['ask', 'allow', 'deny'],
+        }]);
+        permissionManager.setMode(newMode as 'ask' | 'allow' | 'deny');
+        tui.printSuccess(`Permission mode: ${newMode}`);
+      } catch (error) {
+        if (error instanceof Error) tui.printError(error.message);
+      }
+      tui.enableRawMode();
+      tui.render();
+      return;
+    }
+    
+    case 'cost':
+      if (agent) {
+        const usage = agent.getState().contextUsage;
+        tui.printInfo(`Tokens: ${usage.totalTokens} / ${usage.maxTokens} (${Math.round(usage.percentage * 100)}%)`);
+      }
+      return;
+    
+    case 'compact':
+      tui.printInfo('Compacting conversation...');
+      if (agent) agent.compact();
+      return;
+    
+    case 'update':
+      tui.disableRawMode();
+      await checkAndUpdate();
+      tui.enableRawMode();
+      tui.render();
+      return;
+
+    default:
+      tui.printError(`Unknown command: /${cmd}. Type /help for commands.`);
+  }
+}
+
+async function selectModel(config: ProviderConfig): Promise<string> {
+  process.stdout.write('\x1b[?25l');
+  try {
+    const models = await providerRegistry.listModels(config);
+    
+    if (models.length === 0) {
+      tui.printWarning('No models discovered. Enter model ID manually.');
+      const { modelId } = await inquirer.prompt([{
+        type: 'input', name: 'modelId',
+        message: 'Model ID:', default: config.model,
+        validate: (input) => input.trim() ? true : 'Required',
+      }]);
+      return modelId.trim();
+    }
+
+    const choices = models.map(m => ({
+      name: `${m.id}${m.name ? `  ${chalk.dim(`(${m.name})`)}` : ''}${m.id === config.model ? `  ${chalk.green('← current')}` : ''}`,
+      value: m.id, short: m.id,
+    }));
+    choices.unshift({ name: chalk.italic('Custom model ID...'), value: '__custom__', short: 'Custom' });
+
+    const { modelId } = await inquirer.prompt([{
+      type: 'list', name: 'modelId', message: '',
+      choices, pageSize: 15, loop: false,
+    }]);
+
+    if (modelId === '__custom__') {
+      const { customModel } = await inquirer.prompt([{
+        type: 'input', name: 'customModel',
+        message: 'Model ID:', default: config.model,
+        validate: (input) => input.trim() ? true : 'Required',
+      }]);
+      return customModel.trim();
+    }
+    return modelId;
+  } catch (error) {
+    if (error instanceof Error) tui.printError(error.message);
+    const { modelId } = await inquirer.prompt([{
+      type: 'input', name: 'modelId', message: 'Model ID:', default: config.model,
+      validate: (input) => input.trim() ? true : 'Required',
+    }]);
+    return modelId.trim();
+  } finally {
+    process.stdout.write('\x1b[?25h');
+  }
+}
+
+async function configureProviderInteractive(): Promise<void> {
   console.log();
   console.log(chalk.bold('  Configure Provider'));
   console.log();
@@ -718,75 +456,79 @@ async function configureProvider(): Promise<void> {
   const existingConfig = configManager.getActiveProvider();
   
   const { baseUrl } = await inquirer.prompt([{
-    type: 'input',
-    name: 'baseUrl',
-    message: 'Base URL:',
-    default: existingConfig?.baseUrl || 'https://api.openai.com/v1',
-    validate: (input) => {
-      try {
-        new URL(input);
-        return true;
-      } catch {
-        return 'Please enter a valid URL';
-      }
-    },
+    type: 'input', name: 'baseUrl',
+    message: 'Base URL:', default: existingConfig?.baseUrl || 'https://api.openai.com/v1',
+    validate: (input) => { try { new URL(input); return true; } catch { return 'Invalid URL'; }},
   }]);
 
   const { apiKey } = await inquirer.prompt([{
-    type: 'password',
-    name: 'apiKey',
-    message: 'API Key:',
-    default: existingConfig?.apiKey ? '********' : undefined,
-    validate: (input) => input.trim() ? true : 'API key is required',
+    type: 'password', name: 'apiKey',
+    message: 'API Key:', default: existingConfig?.apiKey ? '********' : undefined,
+    validate: (input) => input.trim() ? true : 'API key required',
   }]);
 
   let finalApiKey = apiKey;
-  if (apiKey === '********' && existingConfig?.apiKey) {
-    finalApiKey = existingConfig.apiKey;
-  }
+  if (apiKey === '********' && existingConfig?.apiKey) finalApiKey = existingConfig.apiKey;
 
   const tempConfig: ProviderConfig = { baseUrl, apiKey: finalApiKey, model: '' };
   const model = await selectModel(tempConfig);
 
-  configManager.setProvider('default', {
-    baseUrl,
-    apiKey: finalApiKey,
-    model,
-  });
-
-  console.log();
-  console.log(chalk.green('✔ ') + chalk.green('Provider configured successfully'));
+  configManager.setProvider('default', { baseUrl, apiKey: finalApiKey, model });
+  console.log(chalk.green('\n✔ Provider configured'));
 }
 
-async function listModels(): Promise<void> {
-  const config = await loadProviderConfig();
-  if (!config) {
-    console.log(chalk.red('✖ ') + 'No provider configured. Run "arcline config" first.');
-    process.exit(1);
-  }
-
+async function checkAndUpdate(): Promise<void> {
+  const currentVersion = getVersion();
+  console.log(chalk.cyan(`Current: ${currentVersion}`));
+  console.log(chalk.dim('Checking...'));
+  
   try {
-    const models = await providerRegistry.listModels(config);
+    const res = await fetch('https://registry.npmjs.org/arcline/latest', { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) throw new Error('Failed');
+    const { version: latest } = await res.json() as { version: string };
     
-    if (models.length === 0) {
-      console.log(chalk.cyan('ℹ ') + 'No models found. The provider may not support model discovery.');
+    if (latest === currentVersion) {
+      console.log(chalk.green(`✔ Latest (${currentVersion})`));
       return;
     }
-
-    console.log(chalk.bold('\n  Available models:'));
-    console.log();
-    models.forEach((model) => {
-      const isSelected = model.id === config.model;
-      const prefix = isSelected ? chalk.green('▸ ') : '  ';
-      const name = model.name ? chalk.dim(` (${model.name})`) : '';
-      console.log(`${prefix}${chalk.white(model.id)}${name}`);
+    
+    console.log(chalk.yellow(`Update: ${currentVersion} → ${latest}`));
+    console.log(chalk.dim('Installing...'));
+    
+    const { spawn } = await import('node:child_process');
+    const child = spawn('npm', ['install', '-g', `arcline@${latest}`], { stdio: 'inherit', shell: true });
+    
+    child.on('close', (code) => {
+      if (code === 0) console.log(chalk.green(`\n✔ Updated to ${latest}`));
+      else console.log(chalk.red('\n✖ Failed. Try: npm install -g arcline@' + latest));
     });
-    console.log();
-  } catch (error) {
-    if (error instanceof Error) {
-      console.log(chalk.red('✖ ') + error.message);
-    }
+  } catch (e) {
+    console.log(chalk.red(`✖ ${e instanceof Error ? e.message : 'Check failed'}`));
   }
+}
+
+async function runNonInteractiveSession(config: ProviderConfig, prompt: string): Promise<void> {
+  const projectRoot = findProjectRoot(process.cwd());
+  const toolDefs = toolRegistry.getDefinitions();
+  
+  const agent = createAgent({
+    config: { providerConfig: config, systemPrompt: 'You are a helpful AI coding assistant.', model: config.model, temperature: 0.2, maxTokens: 8000, maxToolCalls: 20, maxIterations: 10, enablePlanMode: true, autoApproveTools: [] },
+    callbacks: {
+      message: (msg) => { if (msg.role === 'assistant' && msg.content) console.log(msg.content); },
+      tool_call: (tc) => console.log(chalk.cyan(`▸ ${tc.function.name}`)),
+      tool_result: (r) => { if (r.isError) console.log(chalk.red(`Error: ${r.error}`)); else if (r.output) console.log(chalk.dim(JSON.stringify(r.output, null, 2))); },
+      tool_progress: (n, p) => { if (p.stage === 'completed') console.log(chalk.green(`✔ ${n}`)); else if (p.stage === 'failed') console.log(chalk.red(`✖ ${n}: ${p.message}`)); },
+      plan_update: (plan) => console.log(chalk.blue(`Plan: ${plan.title}`)),
+      context_update: (usage) => { if (usage.percentage > 0.8) console.log(chalk.yellow(`Context: ${Math.round(usage.percentage * 100)}%`)); },
+      error: (e) => console.log(chalk.red(`Error: ${e.message}`)), complete: (f) => console.log(f),
+      permission_request: async () => 'allow_session' as const,
+    },
+    tools: toolDefs,
+    toolContext: { workingDirectory: projectRoot, sessionId: `session-${Date.now()}`, permissions: permissionManager.getState() },
+  });
+
+  await agent.run(prompt);
+  process.exit(0);
 }
 
 program
@@ -794,141 +536,30 @@ program
   .description('A high-performance terminal AI agent')
   .version(getVersion())
   .option('-d, --debug', 'Enable debug mode')
-  .option('-p, --prompt <prompt>', 'Run a single prompt in non-interactive mode')
-  .hook('preAction', (thisCommand) => {
-    const opts = thisCommand.opts();
-    if (opts['debug']) {
-      configManager.setDebugMode(true);
-      tui.setDebugMode(true);
-    }
-  })
-  .action(async (options: { prompt?: string }) => {
-    const config = await loadProviderConfig();
-    if (!config) {
-      console.log(chalk.red('✖ ') + 'No provider configured. Run "arcline config" first.');
-      process.exit(1);
-    }
-    
-    if (options.prompt) {
-      await runNonInteractiveSession(config, options.prompt);
+  .option('-p, --prompt <prompt>', 'Run a single prompt (non-interactive)')
+  .hook('preAction', (cmd) => { const opts = cmd.opts(); if (opts['debug']) { configManager.setDebugMode(true); tui.setDebugMode(true); } })
+  .action(async (opts: { prompt?: string }) => {
+    if (opts.prompt) {
+      const config = await loadProviderConfig();
+      if (!config) { console.log(chalk.red('✖ No provider configured. Run "arcline config" first.')); process.exit(1); }
+      await runNonInteractiveSession(config, opts.prompt);
     } else {
-      await runInteractiveSession(config);
+      await runInteractiveSession();
     }
   });
 
-program
-  .command('config')
-  .description('Configure AI provider')
-  .action(configureProvider);
-
-program
-  .command('models')
-  .description('List available models')
-  .action(listModels);
-
-program
-  .command('update')
-  .description('Update arcline to the latest version')
-  .action(async () => {
-    const currentVersion = getVersion();
-    console.log(chalk.cyan(`Current version: ${currentVersion}`));
-    console.log(chalk.dim('Checking for updates...'));
-    
-    try {
-      const response = await fetch('https://registry.npmjs.org/arcline/latest');
-      if (!response.ok) throw new Error('Failed to fetch version');
-      const data = await response.json() as { version: string };
-      const latestVersion = data.version;
-      
-      if (latestVersion === currentVersion) {
-        console.log(chalk.green('✔ ') + chalk.green(`Already on the latest version (${currentVersion})`));
-        return;
-      }
-      
-      console.log(chalk.yellow(`Update available: ${currentVersion} → ${latestVersion}`));
-      console.log(chalk.dim('Updating...'));
-      
-      const { spawn } = await import('node:child_process');
-      const child = spawn('npm', ['install', '-g', `arcline@${latestVersion}`], {
-        stdio: 'inherit',
-        shell: true,
-      });
-      
-      child.on('close', (code) => {
-        if (code === 0) {
-          console.log(chalk.green(`\n✔ Updated to ${latestVersion}`));
-          console.log(chalk.dim('Run arcline again to use the new version'));
-        } else {
-          console.log(chalk.red('\n✖ Update failed'));
-          console.log(chalk.dim(`Try manually: npm install -g arcline@${latestVersion}`));
-        }
-      });
-    } catch (error) {
-      if (error instanceof Error) {
-        console.log(chalk.red('✖ ') + error.message);
-      }
-    }
-  });
-
-async function runNonInteractiveSession(config: ProviderConfig, prompt: string): Promise<void> {
-  const projectRoot = findProjectRoot(process.cwd());
-  
-  const toolDefs = toolRegistry.getDefinitions();
-  
-  const agent = createAgent({
-    config: {
-      providerConfig: config,
-      systemPrompt: 'You are a helpful AI coding assistant. Use tools to read, write, and edit files. Execute commands to test your changes.',
-      model: config.model,
-      temperature: 0.2,
-      maxTokens: 8000,
-      maxToolCalls: 20,
-      maxIterations: 10,
-      enablePlanMode: true,
-      autoApproveTools: [],
-    },
-    callbacks: {
-      message: (msg) => {
-        if (msg.role === 'assistant' && msg.content) {
-          console.log(msg.content);
-        }
-      },
-      tool_call: (tc) => console.log(chalk.cyan(`▸ ${tc.function.name}`)),
-      tool_result: (result) => {
-        if (result.isError) {
-          console.log(chalk.red(`Error: ${result.error}`));
-        } else if (result.output) {
-          console.log(chalk.dim(JSON.stringify(result.output, null, 2)));
-        }
-      },
-      tool_progress: (name, progress) => {
-        if (progress.stage === 'completed') {
-          console.log(chalk.green(`✔ ${name} completed`));
-        } else if (progress.stage === 'failed') {
-          console.log(chalk.red(`✖ ${name} failed: ${progress.message}`));
-        }
-      },
-      plan_update: (plan) => console.log(chalk.blue(`Plan: ${plan.title}`)),
-      context_update: () => {},
-      error: (err) => console.log(chalk.red(`Error: ${err.message}`)),
-      complete: (final) => console.log(final),
-      permission_request: async (req) => 'allow_session',
-    },
-    tools: toolDefs,
-    toolContext: {
-      workingDirectory: projectRoot,
-      sessionId: `session-${Date.now()}`,
-      permissions: permissionManager.getState(),
-    },
-  });
-
-  await agent.run(prompt);
+program.command('config').description('Configure provider').action(async () => { await configureProviderInteractive(); process.exit(0); });
+program.command('models').description('List models').action(async () => {
+  const config = await loadProviderConfig();
+  if (!config) { console.log(chalk.red('✖ Run "arcline config" first.')); process.exit(1); }
+  try {
+    const models = await providerRegistry.listModels(config);
+    if (models.length === 0) console.log(chalk.cyan('ℹ No models found.'));
+    else { console.log(chalk.bold('\n  Models:')); models.forEach(m => console.log(`  ${m.id}${m.name ? ` ${chalk.dim(`(${m.name})`)}` : ''}`)); }
+  } catch (e) { if (e instanceof Error) console.log(chalk.red('✖ ' + e.message)); }
   process.exit(0);
-}
-
-program.parseAsync(process.argv).catch((error) => {
-  if (error instanceof Error) {
-    console.log(chalk.red('✖ ') + error.message);
-  }
-  process.exit(1);
 });
+
+program.command('update').description('Update to latest version').action(async () => { await checkAndUpdate(); process.exit(0); });
+
+program.parseAsync(process.argv).catch(e => { if (e instanceof Error) console.log(chalk.red('✖ ' + e.message)); process.exit(1); });

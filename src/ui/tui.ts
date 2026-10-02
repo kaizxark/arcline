@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import figlet from 'figlet';
+import inquirer from 'inquirer';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool';
@@ -428,6 +429,10 @@ export class TUI {
     this.addMessage({ role: 'system', content: chalk.cyan('ℹ ') + message });
   }
 
+  printWarning(message: string): void {
+    this.addMessage({ role: 'system', content: chalk.yellow('⚠ ') + message });
+  }
+
   printSessionHelp(): void {
     this.addMessage({ role: 'system', content: chalk.bold('Commands:') });
     this.addMessage({ role: 'system', content: chalk.dim('  /exit, /quit    ') + 'Exit session' });
@@ -596,6 +601,22 @@ export class TUI {
     }
     
     return options.slice(0, 10);
+  }
+
+  async requestPermission(toolName: string, description: string, category: string): Promise<'allow_once' | 'allow_session' | 'deny' | 'cancel'> {
+    this.disableRawMode();
+    try {
+      const { decision } = await inquirer.prompt([{
+        type: 'list',
+        name: 'decision',
+        message: `Allow ${toolName}? ${description}`,
+        choices: ['allow_once', 'allow_session', 'deny'],
+      }]);
+      return decision;
+    } finally {
+      this.enableRawMode();
+      this.render();
+    }
   }
 
   cleanup(): void {

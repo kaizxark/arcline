@@ -354,6 +354,19 @@ export class AgentOrchestrator {
     this.callbacks.context_update(this.state.contextUsage);
   }
 
+  updateConfig(config: { providerConfig?: ProviderConfig }): void {
+    if (config.providerConfig) {
+      this.config.providerConfig = config.providerConfig;
+      this.config.model = config.providerConfig.model;
+    }
+  }
+
+  compact(): void {
+    this.state.messages = this.state.messages.filter(m => m.role === 'system');
+    this.state.completedToolCalls.clear();
+    this.state.pendingToolCalls = [];
+  }
+
   clearMessages(): void {
     this.state.messages = this.state.messages.filter(m => m.role === 'system');
   }
