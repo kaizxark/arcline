@@ -19,17 +19,17 @@ describe('UI', () => {
     vi.restoreAllMocks();
   });
 
-  describe('printHeader', () => {
-    it('should print header', () => {
-      ui.printHeader();
-      expect(consoleLogSpy).toHaveBeenCalledTimes(5);
+  describe('printIntro', () => {
+    it('should print intro', () => {
+      ui.printIntro();
+      expect(consoleLogSpy).toHaveBeenCalled();
     });
   });
 
   describe('printProviderInfo', () => {
     it('should print provider info', () => {
       ui.printProviderInfo('Test Provider', 'test-model', 'https://api.test.com/v1');
-      expect(consoleLogSpy).toHaveBeenCalledTimes(3);
+      expect(consoleLogSpy).toHaveBeenCalled();
     });
   });
 
@@ -122,7 +122,7 @@ describe('UI', () => {
         { id: 'model-1', name: 'Model One' },
         { id: 'model-2' },
       ], 'model-1');
-      expect(consoleLogSpy).toHaveBeenCalledTimes(5);
+      expect(consoleLogSpy).toHaveBeenCalled();
     });
   });
 

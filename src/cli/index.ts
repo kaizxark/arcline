@@ -48,29 +48,7 @@ async function selectModel(config: ProviderConfig): Promise<string> {
   try {
     const models = await providerRegistry.listModels(config);
     ui.stopSpinner(true);
-
-    if (models.length === 0) {
-      ui.printWarning('No models discovered. You can enter a model ID manually.');
-      const { modelId } = await inquirer.prompt([{
-        type: 'input',
-        name: 'modelId',
-        message: 'Enter model ID:',
-        validate: (input) => input.trim() ? true : 'Model ID is required',
-      }]);
-      return modelId.trim();
-    }
-
-    ui.printModelList(models, config.model);
-
-    const { modelId } = await inquirer.prompt([{
-      type: 'list',
-      name: 'modelId',
-      message: 'Select a model:',
-      choices: models.map(m => ({ name: m.id + (m.name ? ` (${m.name})` : ''), value: m.id })),
-      default: config.model,
-    }]);
-
-    return modelId;
+    return await ui.selectModel(models, config.model);
   } catch (error) {
     ui.stopSpinner(false, 'Failed to fetch models');
     if (error instanceof Error) {
@@ -79,7 +57,8 @@ async function selectModel(config: ProviderConfig): Promise<string> {
     const { modelId } = await inquirer.prompt([{
       type: 'input',
       name: 'modelId',
-      message: 'Enter model ID manually:',
+      message: 'Model ID:',
+      default: config.model,
       validate: (input) => input.trim() ? true : 'Model ID is required',
     }]);
     return modelId.trim();
@@ -87,11 +66,12 @@ async function selectModel(config: ProviderConfig): Promise<string> {
 }
 
 async function runInteractiveSession(config: ProviderConfig): Promise<void> {
+  ui.printIntro();
+  
   const model = await selectModel(config);
   config.model = model;
   configManager.setProvider(configManager.getConfig().activeProvider || 'default', config);
 
-  ui.printHeader();
   ui.printProviderInfo('OpenAI Compatible', model, config.baseUrl);
 
   const session = createSession({
@@ -100,14 +80,16 @@ async function runInteractiveSession(config: ProviderConfig): Promise<void> {
     temperature: 0.7,
   });
 
-  ui.printPrompt();
-
   const readline = await import('node:readline/promises');
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
     terminal: true,
+    prompt: '',
   });
+
+  console.log();
+  ui.printPrompt();
 
   try {
     for await (const line of rl) {
@@ -125,44 +107,58 @@ async function runInteractiveSession(config: ProviderConfig): Promise<void> {
       if (input === '/clear') {
         session.clear();
         ui.printSuccess('Conversation cleared');
+        console.log();
         ui.printPrompt();
         continue;
       }
 
       if (input === '/help') {
-        console.log();
-        console.log(chalk.bold('Session Commands:'));
-        console.log('  /exit, /quit     Exit the session');
-        console.log('  /clear           Clear conversation history');
-        console.log('  /model <name>    Switch model');
-        console.log('  /help            Show this help');
+        ui.printSessionHelp();
+        ui.printPrompt();
+        continue;
+      }
+
+      if (input === '/model') {
+        const newModel = await selectModel(config);
+        config.model = newModel;
+        configManager.setProvider(configManager.getConfig().activeProvider || 'default', config);
+        session.updateConfig({ provider: config });
+        ui.printSuccess(`Switched to model: ${newModel}`);
         console.log();
         ui.printPrompt();
         continue;
       }
 
-      if (input.startsWith('/model ')) {
-        const newModel = input.slice(7).trim();
-        if (newModel) {
-          config.model = newModel;
-          configManager.setProvider(configManager.getConfig().activeProvider || 'default', config);
+      if (input === '/config') {
+        await configureProvider();
+        const newConfig = await loadProviderConfig();
+        if (newConfig) {
+          config.baseUrl = newConfig.baseUrl;
+          config.apiKey = newConfig.apiKey;
+          config.model = newConfig.model;
           session.updateConfig({ provider: config });
-          ui.printSuccess(`Switched to model: ${newModel}`);
         }
+        ui.printIntro();
+        ui.printProviderInfo('OpenAI Compatible', config.model, config.baseUrl);
+        console.log();
         ui.printPrompt();
         continue;
       }
 
-      ui.printNewline();
+      console.log();
+      ui.printUserMessage(input);
+      console.log();
       ui.printAssistantPrefix();
 
       try {
         for await (const chunk of await session.sendMessage(input, { stream: true })) {
           ui.printAssistantContent(chunk);
         }
-        ui.printNewline();
+        ui.printAssistantComplete();
       } catch (error) {
-        ui.printNewline();
+        console.log();
+        console.log(chalk.green('└'));
+        console.log();
         if (error instanceof Error) {
           ui.printError(error.message);
         }
@@ -176,13 +172,14 @@ async function runInteractiveSession(config: ProviderConfig): Promise<void> {
     }
   } finally {
     rl.close();
-    ui.printNewline();
+    console.log();
     ui.printInfo('Goodbye!');
   }
 }
 
 async function configureProvider(): Promise<void> {
-  console.log(chalk.bold('Configure Provider'));
+  console.log();
+  console.log(chalk.bold('  Configure Provider'));
   console.log();
 
   const existingConfig = configManager.getActiveProvider();
@@ -264,6 +261,14 @@ program
       configManager.setDebugMode(true);
       ui.setDebugMode(true);
     }
+  })
+  .action(async () => {
+    const config = await loadProviderConfig();
+    if (!config) {
+      ui.printError('No provider configured. Run "arcline config" first.');
+      process.exit(1);
+    }
+    await runInteractiveSession(config);
   });
 
 program
@@ -276,30 +281,9 @@ program
   .description('List available models')
   .action(listModels);
 
-program
-  .command('session')
-  .description('Start interactive session (default)')
-  .action(async () => {
-    const config = await loadProviderConfig();
-    if (!config) {
-      ui.printError('No provider configured. Run "arcline config" first.');
-      process.exit(1);
-    }
-    await runInteractiveSession(config);
-  });
-
 program.parseAsync(process.argv).catch((error) => {
   if (error instanceof Error) {
     ui.printError(error.message);
   }
   process.exit(1);
 });
-
-if (!process.argv.slice(2).length) {
-  const config = await loadProviderConfig();
-  if (!config) {
-    ui.printError('No provider configured. Run "arcline config" first.');
-    process.exit(1);
-  }
-  await runInteractiveSession(config);
-}
