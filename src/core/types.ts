@@ -29,6 +29,14 @@ export interface ToolCall {
   };
 }
 
+export interface ToolResult {
+  callId: string;
+  output: unknown;
+  error?: string;
+  isError: boolean;
+  truncated?: boolean;
+}
+
 export interface ChatCompletionRequest {
   model: string;
   messages: Message[];

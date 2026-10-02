@@ -2,9 +2,17 @@ import chalk from 'chalk';
 import figlet from 'figlet';
 
 export interface Message {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   isStreaming?: boolean;
+  toolCallId?: string;
+}
+
+export interface AutocompleteOption {
+  label: string;
+  value: string;
+  type: 'command' | 'file' | 'model';
+  description?: string;
 }
 
 export class TUI {
@@ -23,6 +31,12 @@ export class TUI {
   private modelName = '';
   private baseUrl = '';
   private rawMode = false;
+  private autocompleteActive = false;
+  private autocompleteOptions: AutocompleteOption[] = [];
+  private autocompleteSelected = 0;
+  private autocompletePrefix = '';
+  private inputHistory: string[] = [];
+  private historyIndex = -1;
 
   constructor() {
     this.updateTerminalSize();
@@ -387,6 +401,12 @@ export class TUI {
     this.addMessage({ role: 'system', content: chalk.dim('  /model          ') + 'Switch model' });
     this.addMessage({ role: 'system', content: chalk.dim('  /config         ') + 'Reconfigure provider' });
     this.addMessage({ role: 'system', content: chalk.dim('  /help           ') + 'Show this help' });
+    this.addMessage({ role: 'system', content: chalk.dim('  /plan           ') + 'Create a plan for a complex task' });
+    this.addMessage({ role: 'system', content: chalk.dim('  /permissions    ') + 'Manage tool permissions' });
+    this.addMessage({ role: 'system', content: chalk.dim('  /cost           ') + 'Show usage and cost' });
+    this.addMessage({ role: 'system', content: chalk.dim('  /compact        ') + 'Compact conversation history' });
+    this.addMessage({ role: 'system', content: chalk.dim('  /resume         ') + 'Resume previous session' });
+    this.addMessage({ role: 'system', content: chalk.dim('  /init           ') + 'Initialize project instructions' });
   }
 
   clearMessages(): void {
@@ -404,6 +424,144 @@ export class TUI {
       if (msg && msg.role === 'user') return msg.content;
     }
     return null;
+  }
+
+  addToHistory(input: string): void {
+    if (input.trim() && (this.inputHistory.length === 0 || this.inputHistory[this.inputHistory.length - 1] !== input)) {
+      this.inputHistory.push(input);
+      if (this.inputHistory.length > 100) this.inputHistory.shift();
+    }
+    this.historyIndex = this.inputHistory.length;
+  }
+
+  navigateHistory(direction: 'up' | 'down'): void {
+    if (this.inputHistory.length === 0) return;
+    
+    if (direction === 'up') {
+      if (this.historyIndex > 0) {
+        this.historyIndex--;
+        const historyItem = this.inputHistory[this.historyIndex];
+        if (historyItem !== undefined) {
+          this.inputBuffer = historyItem;
+          this.cursorPosition = this.inputBuffer.length;
+          this.renderInputBar();
+          this.updateInputCursor();
+        }
+      }
+    } else {
+      if (this.historyIndex < this.inputHistory.length - 1) {
+        this.historyIndex++;
+        const historyItem = this.inputHistory[this.historyIndex];
+        if (historyItem !== undefined) {
+          this.inputBuffer = historyItem;
+          this.cursorPosition = this.inputBuffer.length;
+          this.renderInputBar();
+          this.updateInputCursor();
+        }
+      } else {
+        this.historyIndex = this.inputHistory.length;
+        this.inputBuffer = '';
+        this.cursorPosition = 0;
+        this.renderInputBar();
+        this.updateInputCursor();
+      }
+    }
+  }
+
+  showAutocomplete(options: AutocompleteOption[], prefix: string): void {
+    this.autocompleteOptions = options;
+    this.autocompleteSelected = 0;
+    this.autocompletePrefix = prefix;
+    this.autocompleteActive = true;
+    this.renderAutocomplete();
+  }
+
+  hideAutocomplete(): void {
+    if (this.autocompleteActive) {
+      this.autocompleteActive = false;
+      this.autocompleteOptions = [];
+      this.autocompleteSelected = 0;
+      this.autocompletePrefix = '';
+      this.renderInputBar();
+    }
+  }
+
+  selectAutocompleteNext(): void {
+    if (!this.autocompleteActive || this.autocompleteOptions.length === 0) return;
+    this.autocompleteSelected = (this.autocompleteSelected + 1) % this.autocompleteOptions.length;
+    this.renderAutocomplete();
+  }
+
+  selectAutocompletePrev(): void {
+    if (!this.autocompleteActive || this.autocompleteOptions.length === 0) return;
+    this.autocompleteSelected = (this.autocompleteSelected - 1 + this.autocompleteOptions.length) % this.autocompleteOptions.length;
+    this.renderAutocomplete();
+  }
+
+  acceptAutocomplete(): void {
+    if (!this.autocompleteActive || this.autocompleteOptions.length === 0) return;
+    const option = this.autocompleteOptions[this.autocompleteSelected];
+    if (!option) return;
+    const beforeCursor = this.inputBuffer.slice(0, this.cursorPosition - this.autocompletePrefix.length);
+    this.inputBuffer = beforeCursor + option.value;
+    this.cursorPosition = this.inputBuffer.length;
+    this.hideAutocomplete();
+    this.renderInputBar();
+    this.updateInputCursor();
+  }
+
+  private renderAutocomplete(): void {
+    if (!this.autocompleteActive || this.autocompleteOptions.length === 0) return;
+    
+    const inputRow = this.terminalHeight - this.inputAreaHeight + 1;
+    const startRow = Math.max(1, inputRow - this.autocompleteOptions.length - 2);
+    
+    for (let i = 0; i < this.autocompleteOptions.length; i++) {
+      const row = startRow + i;
+      this.moveCursor(row, 1);
+      this.clearLine();
+      
+      const option = this.autocompleteOptions[i];
+      if (!option) continue;
+      const isSelected = i === this.autocompleteSelected;
+      const prefix = isSelected ? chalk.green('▸ ') : '  ';
+      const typeColor = option.type === 'command' ? chalk.cyan : option.type === 'file' ? chalk.green : chalk.yellow;
+      
+      process.stdout.write(prefix + typeColor(option.label));
+      if (option.description) {
+        process.stdout.write(chalk.dim(`  ${option.description}`));
+      }
+    }
+    
+    this.moveCursor(startRow + this.autocompleteOptions.length, 1);
+    this.clearLine();
+  }
+
+  getAutocompleteMatches(query: string, commands: string[], files: string[], models: string[]): AutocompleteOption[] {
+    const options: AutocompleteOption[] = [];
+    const lowerQuery = query.toLowerCase();
+    
+    if (query.startsWith('/')) {
+      for (const cmd of commands) {
+        if (cmd.toLowerCase().startsWith(lowerQuery)) {
+          options.push({ label: cmd, value: cmd, type: 'command' });
+        }
+      }
+    } else if (query.startsWith('@')) {
+      for (const file of files) {
+        if (file.toLowerCase().includes(lowerQuery.slice(1).toLowerCase())) {
+          options.push({ label: file, value: `@${file}`, type: 'file' });
+        }
+      }
+    } else {
+      for (const model of models) {
+        if (model.toLowerCase().includes(lowerQuery)) {
+          options.push({ label: model, value: model, type: 'model' });
+        }
+      }
+    }
+    
+    return options.slice(0, 10);
   }
 
   cleanup(): void {
