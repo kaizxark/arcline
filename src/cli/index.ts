@@ -3,8 +3,8 @@ import { program } from 'commander';
 import { configManager } from '../config/index.js';
 import { providerRegistry } from '../providers/index.js';
 import { createSession } from '../session/index.js';
-import { ui } from '../ui/index.js';
-import type { ProviderConfig } from '../core/types.js';
+import { tui, TUI } from '../ui/tui.js';
+import type { ProviderConfig, Message } from '../core/types.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -44,15 +44,60 @@ async function loadProviderConfig(): Promise<ProviderConfig | null> {
 }
 
 async function selectModel(config: ProviderConfig): Promise<string> {
-  ui.startSpinner('Fetching models...');
+  process.stdout.write('\x1b[?25l');
   try {
     const models = await providerRegistry.listModels(config);
-    ui.stopSpinner(true);
-    return await ui.selectModel(models, config.model);
+    
+    if (models.length === 0) {
+      const { modelId } = await inquirer.prompt([{
+        type: 'input',
+        name: 'modelId',
+        message: 'Model ID:',
+        default: config.model,
+        validate: (input) => input.trim() ? true : 'Model ID is required',
+      }]);
+      return modelId.trim();
+    }
+
+    const choices = models.map(m => ({
+      name: `${m.id}${m.name ? `  ${chalk.dim(`(${m.name})`)}` : ''}${m.id === config.model ? `  ${chalk.green('← current')}` : ''}`,
+      value: m.id,
+      short: m.id,
+    }));
+
+    choices.unshift({
+      name: chalk.italic('Enter custom model ID...'),
+      value: '__custom__',
+      short: 'Custom',
+    });
+
+    console.log(chalk.bold('\n  Select a model:'));
+    console.log();
+
+    const { modelId } = await inquirer.prompt([{
+      type: 'list',
+      name: 'modelId',
+      message: '',
+      choices,
+      pageSize: 15,
+      loop: false,
+    }]);
+
+    if (modelId === '__custom__') {
+      const { customModel } = await inquirer.prompt([{
+        type: 'input',
+        name: 'customModel',
+        message: 'Model ID:',
+        default: config.model,
+        validate: (input) => input.trim() ? true : 'Model ID is required',
+      }]);
+      return customModel.trim();
+    }
+
+    return modelId;
   } catch (error) {
-    ui.stopSpinner(false, 'Failed to fetch models');
     if (error instanceof Error) {
-      ui.printError(error.message);
+      console.log(chalk.red('\n✖ ') + error.message);
     }
     const { modelId } = await inquirer.prompt([{
       type: 'input',
@@ -62,17 +107,174 @@ async function selectModel(config: ProviderConfig): Promise<string> {
       validate: (input) => input.trim() ? true : 'Model ID is required',
     }]);
     return modelId.trim();
+  } finally {
+    process.stdout.write('\x1b[?25h');
   }
 }
 
-async function runInteractiveSession(config: ProviderConfig): Promise<void> {
-  ui.printIntro();
+function handleKeypress(key: Buffer | string, tuiInstance: TUI, session: ReturnType<typeof createSession>, config: ProviderConfig): Promise<{ shouldExit: boolean; shouldContinue: boolean }> {
+  const keyStr = key.toString();
   
+  if (keyStr === '\u0003') {
+    return Promise.resolve({ shouldExit: true, shouldContinue: false });
+  }
+  
+  if (keyStr === '\r' || keyStr === '\n') {
+    const input = tuiInstance.getInputBuffer().trim();
+    tuiInstance.clearInputBuffer();
+    
+    if (!input) {
+      return Promise.resolve({ shouldExit: false, shouldContinue: true });
+    }
+    
+    if (input === '/exit' || input === '/quit') {
+      return Promise.resolve({ shouldExit: true, shouldContinue: false });
+    }
+    
+    if (input === '/clear') {
+      session.clear();
+      tuiInstance.clearMessages();
+      tuiInstance.printSuccess('Conversation cleared');
+      return Promise.resolve({ shouldExit: false, shouldContinue: true });
+    }
+    
+    if (input === '/help') {
+      tuiInstance.printSessionHelp();
+      return Promise.resolve({ shouldExit: false, shouldContinue: true });
+    }
+    
+    if (input === '/model') {
+      return handleModelSwitch(tuiInstance, session, config);
+    }
+    
+    if (input === '/config') {
+      return handleConfig(tuiInstance, session, config);
+    }
+    
+    return handleUserMessage(input, tuiInstance, session);
+  }
+  
+  if (keyStr === '\u007f' || keyStr === '\b') {
+    tuiInstance.deleteChar();
+    return Promise.resolve({ shouldExit: false, shouldContinue: true });
+  }
+  
+  if (keyStr === '\u001b[D' || keyStr === '\u001bOD') {
+    tuiInstance.moveCursorLeft();
+    return Promise.resolve({ shouldExit: false, shouldContinue: true });
+  }
+  
+  if (keyStr === '\u001b[C' || keyStr === '\u001bOC') {
+    tuiInstance.moveCursorRight();
+    return Promise.resolve({ shouldExit: false, shouldContinue: true });
+  }
+  
+  if (keyStr === '\u001b[H' || keyStr === '\u001bOH') {
+    tuiInstance.moveCursorHome();
+    return Promise.resolve({ shouldExit: false, shouldContinue: true });
+  }
+  
+  if (keyStr === '\u001b[F' || keyStr === '\u001bOF') {
+    tuiInstance.moveCursorEnd();
+    return Promise.resolve({ shouldExit: false, shouldContinue: true });
+  }
+  
+  if (keyStr === '\u001b[3~') {
+    tuiInstance.deleteCharForward();
+    return Promise.resolve({ shouldExit: false, shouldContinue: true });
+  }
+  
+  if (keyStr === '\u001b[A' || keyStr === '\u001bOA') {
+    tuiInstance.scrollUp();
+    return Promise.resolve({ shouldExit: false, shouldContinue: true });
+  }
+  
+  if (keyStr === '\u001b[B' || keyStr === '\u001bOB') {
+    tuiInstance.scrollDown();
+    return Promise.resolve({ shouldExit: false, shouldContinue: true });
+  }
+  
+  if (keyStr.length === 1 && keyStr >= ' ' && keyStr <= '~') {
+    tuiInstance.insertChar(keyStr);
+    return Promise.resolve({ shouldExit: false, shouldContinue: true });
+  }
+  
+  return Promise.resolve({ shouldExit: false, shouldContinue: true });
+}
+
+async function handleModelSwitch(tuiInstance: TUI, session: ReturnType<typeof createSession>, config: ProviderConfig): Promise<{ shouldExit: boolean; shouldContinue: boolean }> {
+  tuiInstance.disableRawMode();
+  try {
+    const newModel = await selectModel(config);
+    config.model = newModel;
+    configManager.setProvider(configManager.getConfig().activeProvider || 'default', config);
+    session.updateConfig({ provider: config });
+    tuiInstance.printSuccess(`Switched to model: ${newModel}`);
+    tuiInstance.setProviderInfo('OpenAI Compatible', newModel, config.baseUrl);
+  } catch (error) {
+    if (error instanceof Error) {
+      tuiInstance.printError(error.message);
+    }
+  }
+  tuiInstance.enableRawMode();
+  tuiInstance.render();
+  return { shouldExit: false, shouldContinue: true };
+}
+
+async function handleConfig(tuiInstance: TUI, session: ReturnType<typeof createSession>, config: ProviderConfig): Promise<{ shouldExit: boolean; shouldContinue: boolean }> {
+  tuiInstance.disableRawMode();
+  try {
+    await configureProvider();
+    const newConfig = await loadProviderConfig();
+    if (newConfig) {
+      config.baseUrl = newConfig.baseUrl;
+      config.apiKey = newConfig.apiKey;
+      config.model = newConfig.model;
+      session.updateConfig({ provider: config });
+      tuiInstance.setProviderInfo('OpenAI Compatible', config.model, config.baseUrl);
+      tuiInstance.clearMessages();
+      tuiInstance.printIntro();
+    }
+  } catch (error) {
+    if (error instanceof Error) {
+      tuiInstance.printError(error.message);
+    }
+  }
+  tuiInstance.enableRawMode();
+  tuiInstance.render();
+  return { shouldExit: false, shouldContinue: true };
+}
+
+async function handleUserMessage(input: string, tuiInstance: TUI, session: ReturnType<typeof createSession>): Promise<{ shouldExit: boolean; shouldContinue: boolean }> {
+  tuiInstance.addMessage({ role: 'user', content: input });
+  
+  try {
+    tuiInstance.addMessage({ role: 'assistant', content: '', isStreaming: true });
+    
+    let fullContent = '';
+    for await (const chunk of await session.sendMessage(input, { stream: true })) {
+      fullContent += chunk;
+      tuiInstance.updateLastMessage(fullContent, true);
+    }
+    
+    tuiInstance.updateLastMessage(fullContent, false);
+  } catch (error) {
+    tuiInstance.updateLastMessage('', false);
+    if (error instanceof Error) {
+      tuiInstance.printError(error.message);
+    }
+  }
+  
+  return { shouldExit: false, shouldContinue: true };
+}
+
+async function runInteractiveSession(config: ProviderConfig): Promise<void> {
   const model = await selectModel(config);
   config.model = model;
   configManager.setProvider(configManager.getConfig().activeProvider || 'default', config);
 
-  ui.printProviderInfo('OpenAI Compatible', model, config.baseUrl);
+  tui.setProviderInfo('OpenAI Compatible', model, config.baseUrl);
+  tui.printIntro();
 
   const session = createSession({
     provider: config,
@@ -80,101 +282,32 @@ async function runInteractiveSession(config: ProviderConfig): Promise<void> {
     temperature: 0.7,
   });
 
-  const readline = await import('node:readline/promises');
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: true,
-    prompt: '',
+  tui.enableRawMode();
+  tui.render();
+
+  let shouldExit = false;
+  
+  process.stdin.on('data', async (key) => {
+    if (shouldExit) return;
+    const result = await handleKeypress(key, tui, session, config);
+    if (result.shouldExit) {
+      shouldExit = true;
+      tui.cleanup();
+      process.exit(0);
+    }
   });
 
-  console.log();
-  ui.printPrompt();
+  process.on('SIGINT', () => {
+    tui.cleanup();
+    process.exit(0);
+  });
 
-  try {
-    for await (const line of rl) {
-      const input = line.trim();
-      
-      if (!input) {
-        ui.printPrompt();
-        continue;
-      }
+  process.on('SIGTERM', () => {
+    tui.cleanup();
+    process.exit(0);
+  });
 
-      if (input === '/exit' || input === '/quit') {
-        break;
-      }
-
-      if (input === '/clear') {
-        session.clear();
-        ui.printSuccess('Conversation cleared');
-        console.log();
-        ui.printPrompt();
-        continue;
-      }
-
-      if (input === '/help') {
-        ui.printSessionHelp();
-        ui.printPrompt();
-        continue;
-      }
-
-      if (input === '/model') {
-        const newModel = await selectModel(config);
-        config.model = newModel;
-        configManager.setProvider(configManager.getConfig().activeProvider || 'default', config);
-        session.updateConfig({ provider: config });
-        ui.printSuccess(`Switched to model: ${newModel}`);
-        console.log();
-        ui.printPrompt();
-        continue;
-      }
-
-      if (input === '/config') {
-        await configureProvider();
-        const newConfig = await loadProviderConfig();
-        if (newConfig) {
-          config.baseUrl = newConfig.baseUrl;
-          config.apiKey = newConfig.apiKey;
-          config.model = newConfig.model;
-          session.updateConfig({ provider: config });
-        }
-        ui.printIntro();
-        ui.printProviderInfo('OpenAI Compatible', config.model, config.baseUrl);
-        console.log();
-        ui.printPrompt();
-        continue;
-      }
-
-      console.log();
-      ui.printUserMessage(input);
-      console.log();
-      ui.printAssistantPrefix();
-
-      try {
-        for await (const chunk of await session.sendMessage(input, { stream: true })) {
-          ui.printAssistantContent(chunk);
-        }
-        ui.printAssistantComplete();
-      } catch (error) {
-        console.log();
-        console.log(chalk.green('└'));
-        console.log();
-        if (error instanceof Error) {
-          ui.printError(error.message);
-        }
-      }
-
-      ui.printPrompt();
-    }
-  } catch (error) {
-    if (error instanceof Error) {
-      ui.printError(error.message);
-    }
-  } finally {
-    rl.close();
-    console.log();
-    ui.printInfo('Goodbye!');
-  }
+  await new Promise<void>(() => {});
 }
 
 async function configureProvider(): Promise<void> {
@@ -221,31 +354,37 @@ async function configureProvider(): Promise<void> {
     model,
   });
 
-  ui.printSuccess('Provider configured successfully');
+  console.log();
+  console.log(chalk.green('✔ ') + chalk.green('Provider configured successfully'));
 }
 
 async function listModels(): Promise<void> {
   const config = await loadProviderConfig();
   if (!config) {
-    ui.printError('No provider configured. Run "arcline config" first.');
+    console.log(chalk.red('✖ ') + 'No provider configured. Run "arcline config" first.');
     process.exit(1);
   }
 
-  ui.startSpinner('Fetching models...');
   try {
     const models = await providerRegistry.listModels(config);
-    ui.stopSpinner(true);
     
     if (models.length === 0) {
-      ui.printInfo('No models found. The provider may not support model discovery.');
+      console.log(chalk.cyan('ℹ ') + 'No models found. The provider may not support model discovery.');
       return;
     }
 
-    ui.printModelList(models, config.model);
+    console.log(chalk.bold('\n  Available models:'));
+    console.log();
+    models.forEach((model) => {
+      const isSelected = model.id === config.model;
+      const prefix = isSelected ? chalk.green('▸ ') : '  ';
+      const name = model.name ? chalk.dim(` (${model.name})`) : '';
+      console.log(`${prefix}${chalk.white(model.id)}${name}`);
+    });
+    console.log();
   } catch (error) {
-    ui.stopSpinner(false, 'Failed to fetch models');
     if (error instanceof Error) {
-      ui.printError(error.message);
+      console.log(chalk.red('✖ ') + error.message);
     }
   }
 }
@@ -259,13 +398,13 @@ program
     const opts = thisCommand.opts();
     if (opts['debug']) {
       configManager.setDebugMode(true);
-      ui.setDebugMode(true);
+      tui.setDebugMode(true);
     }
   })
   .action(async () => {
     const config = await loadProviderConfig();
     if (!config) {
-      ui.printError('No provider configured. Run "arcline config" first.');
+      console.log(chalk.red('✖ ') + 'No provider configured. Run "arcline config" first.');
       process.exit(1);
     }
     await runInteractiveSession(config);
@@ -283,7 +422,7 @@ program
 
 program.parseAsync(process.argv).catch((error) => {
   if (error instanceof Error) {
-    ui.printError(error.message);
+    console.log(chalk.red('✖ ') + error.message);
   }
   process.exit(1);
 });
