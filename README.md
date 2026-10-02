@@ -14,6 +14,8 @@ Then simply run:
 arcline
 ```
 
+You'll see a beautiful retro-style banner and be guided through model selection.
+
 ## Usage
 
 ### Start a Session
@@ -21,6 +23,8 @@ arcline
 ```bash
 arcline
 ```
+
+On first run, you'll see the ARCLINE banner, then be prompted to select a model from discovered models or enter a custom model ID.
 
 ### Configure Provider
 
@@ -51,8 +55,8 @@ arcline --debug
 
 Arcline stores configuration in your platform's standard config directory:
 
-- **Linux/macOS**: `~/.config/arcline/config.json`
-- **Windows**: `%APPDATA%\arcline\config.json`
+- **Linux/macOS**: `~/.config/arcline-nodejs/config.json`
+- **Windows**: `%APPDATA%\arcline-nodejs\config.json`
 
 ### Provider Setup
 
@@ -93,7 +97,8 @@ During an interactive session:
 |---------|-------------|
 | `/exit`, `/quit` | Exit the session |
 | `/clear` | Clear conversation history |
-| `/model <name>` | Switch to a different model |
+| `/model` | Switch to a different model (shows model selector) |
+| `/config` | Reconfigure provider |
 | `/help` | Show session help |
 
 ## Development
@@ -106,7 +111,7 @@ During an interactive session:
 ### Setup
 
 ```bash
-git clone https://github.com/yourusername/arcline.git
+git clone https://github.com/kaizxark/arcline.git
 cd arcline
 npm install
 ```
