@@ -37,6 +37,8 @@ export class TUI {
   private autocompletePrefix = '';
   private inputHistory: string[] = [];
   private historyIndex = -1;
+  private latestVersion: string | null = null;
+  private versionChecked = false;
 
   constructor() {
     this.updateTerminalSize();
@@ -51,6 +53,29 @@ export class TUI {
     this.modelName = model;
     this.baseUrl = baseUrl.replace(/^https?:\/\//, '');
     this.providerInfo = `${provider} • ${model} • ${this.baseUrl}`;
+  }
+
+  async checkForUpdates(currentVersion: string): Promise<void> {
+    if (this.versionChecked) return;
+    this.versionChecked = true;
+    
+    try {
+      const response = await fetch('https://registry.npmjs.org/arcline/latest', {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (response.ok) {
+        const data = await response.json() as { version: string };
+        if (data.version && data.version !== currentVersion) {
+          this.latestVersion = data.version;
+        }
+      }
+    } catch {
+      // Silently ignore version check failures
+    }
+  }
+
+  getLatestVersion(): string | null {
+    return this.latestVersion;
   }
 
   private updateTerminalSize(): void {
@@ -271,8 +296,17 @@ export class TUI {
 
     this.moveCursor(inputRow + 2, 1);
     this.clearLine();
+    
     const hints = chalk.dim('Enter: send  •  ↑/↓: scroll  •  /help: commands  •  Ctrl+C: exit');
-    process.stdout.write(hints);
+    let hintLine = hints;
+    
+    if (this.latestVersion) {
+      const updateMsg = chalk.yellow(`⬆ Update available: run "arcline update" (${this.latestVersion})`);
+      const padding = ' '.repeat(Math.max(1, this.terminalWidth - hints.length - updateMsg.length - 2));
+      hintLine = hints + padding + updateMsg;
+    }
+    
+    process.stdout.write(hintLine);
   }
 
   private updateInputCursor(): void {

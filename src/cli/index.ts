@@ -502,6 +502,9 @@ async function runInteractiveSession(config: ProviderConfig): Promise<void> {
   tui.setProviderInfo('OpenAI Compatible', model, config.baseUrl);
   tui.printIntro();
 
+  // Check for updates in background
+  tui.checkForUpdates(getVersion()).catch(() => {});
+
   const projectRoot = findProjectRoot(process.cwd());
   contextManager.loadProjectInstructions();
 
@@ -822,6 +825,50 @@ program
   .command('models')
   .description('List available models')
   .action(listModels);
+
+program
+  .command('update')
+  .description('Update arcline to the latest version')
+  .action(async () => {
+    const currentVersion = getVersion();
+    console.log(chalk.cyan(`Current version: ${currentVersion}`));
+    console.log(chalk.dim('Checking for updates...'));
+    
+    try {
+      const response = await fetch('https://registry.npmjs.org/arcline/latest');
+      if (!response.ok) throw new Error('Failed to fetch version');
+      const data = await response.json() as { version: string };
+      const latestVersion = data.version;
+      
+      if (latestVersion === currentVersion) {
+        console.log(chalk.green('✔ ') + chalk.green(`Already on the latest version (${currentVersion})`));
+        return;
+      }
+      
+      console.log(chalk.yellow(`Update available: ${currentVersion} → ${latestVersion}`));
+      console.log(chalk.dim('Updating...'));
+      
+      const { spawn } = await import('node:child_process');
+      const child = spawn('npm', ['install', '-g', `arcline@${latestVersion}`], {
+        stdio: 'inherit',
+        shell: true,
+      });
+      
+      child.on('close', (code) => {
+        if (code === 0) {
+          console.log(chalk.green(`\n✔ Updated to ${latestVersion}`));
+          console.log(chalk.dim('Run arcline again to use the new version'));
+        } else {
+          console.log(chalk.red('\n✖ Update failed'));
+          console.log(chalk.dim(`Try manually: npm install -g arcline@${latestVersion}`));
+        }
+      });
+    } catch (error) {
+      if (error instanceof Error) {
+        console.log(chalk.red('✖ ') + error.message);
+      }
+    }
+  });
 
 async function runNonInteractiveSession(config: ProviderConfig, prompt: string): Promise<void> {
   const projectRoot = findProjectRoot(process.cwd());
