@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+export PATH="/home/kaizxark/.nvm/versions/node/v24.22.1/bin:$PATH"
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
+cd "$REPO_ROOT"
+exec node --import tsx/esm "$REPO_ROOT/apps/cli/src/bin.ts" "$@"
