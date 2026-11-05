@@ -58,7 +58,7 @@ export function productWebBundleIsolation(repository: string, webRoot: string): 
             name: 'dsh-worker-build-inputs',
             generateBundle: {
               order: 'post',
-              handler(_options, bundle) { inputs.workerBundle(bundle, this.getWatchFiles()) },
+              handler(_options, bundle) { inputs.workerBundle(bundle, this.getWatchFiles?.() ?? []) },
             },
           }],
         },

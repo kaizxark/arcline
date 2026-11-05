@@ -86,10 +86,10 @@ export class WebProductBundleIsolation {
       this.chunks.set(item.fileName, {
         ...item,
         modules: { ...item.modules },
-        imports: [...item.imports],
-        dynamicImports: [...item.dynamicImports],
-        implicitlyLoadedBefore: [...item.implicitlyLoadedBefore],
-        referencedFiles: [...item.referencedFiles],
+        imports: [...item.imports ?? []],
+        dynamicImports: [...item.dynamicImports ?? []],
+        implicitlyLoadedBefore: [...item.implicitlyLoadedBefore ?? []],
+        referencedFiles: [...item.referencedFiles ?? []],
         ...(item.viteMetadata === undefined ? {} : { viteMetadata: {
           importedCss: new Set(item.viteMetadata.importedCss),
           importedAssets: new Set(item.viteMetadata.importedAssets),
@@ -156,7 +156,10 @@ export class WebProductBundleIsolation {
       visitedModules.add(id)
       this.inputs.assertInput(id)
       const info = moduleInfo(id)
-      if (info === null) throw new Error(`Web product isolation: module ${id} has no Rollup module record`)
+      if (info === null) {
+        if (physicalBundleInput(id) === undefined) return
+        throw new Error(`Web product isolation: module ${id} has no Rollup module record`)
+      }
       if (info.isExternal) throw new Error(`Web product isolation: external module ${id} has no bundled input proof`)
       if (/\.(?:css|less|sass|scss|styl|stylus|pcss|postcss|sss)(?:$|\?)/i.test(id) && !this.cssInputs.has(id)) {
         throw new Error(`Web product isolation: stylesheet ${id} has no recorded transform inputs`)
@@ -178,7 +181,7 @@ export class WebProductBundleIsolation {
       if (this.workerInputs.has(file)) checkWorker(file)
       else if (item.type === 'chunk') {
         for (const id of Object.keys(item.modules)) checkModule(id)
-        queue.push(...item.imports, ...item.dynamicImports, ...item.implicitlyLoadedBefore, ...item.referencedFiles)
+        queue.push(...item.imports ?? [], ...item.dynamicImports ?? [], ...item.implicitlyLoadedBefore ?? [], ...item.referencedFiles ?? [])
         queue.push(...item.viteMetadata?.importedCss ?? [], ...item.viteMetadata?.importedAssets ?? [])
       } else if (cssOwners.has(file)) {
         for (const id of cssOwners.get(file) ?? []) checkModule(id)
