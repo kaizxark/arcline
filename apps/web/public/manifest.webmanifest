@@ -1,6 +1,6 @@
 {
-  "name": "DeepSeek Harness",
-  "short_name": "DSH",
+  "name": "ARCline",
+  "short_name": "ARCline",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
