@@ -1,6 +1,6 @@
 {
   "name": "arcline",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "ARCline: A high-performance agentic harness and AI coding assistant with Web UI, terminal, and headless execution",
   "author": "kaizxark <kaizxark@gmail.com>",
   "license": "MIT",
@@ -29,6 +29,8 @@
   },
   "files": [
     "bin",
+    "dist",
+    "arcline.overlay.yml",
     "README.md",
     "LICENSE"
   ],

@@ -1,0 +1,21 @@
+# ARCline runtime overlay: disables default DeepSeek model plugins and API listings
+- id: llm-deepseek
+  disabled: true
+
+- id: llm-deepseek-account
+  disabled: true
+
+- id: plugin-package-inventory-deepseek
+  disabled: true
+
+- id: web-search-deepseek
+  disabled: true
+
+- id: web-deepseek-api
+  disabled: true
+
+- id: deepseek-account
+  disabled: true
+
+- id: account-controller
+  disabled: true
