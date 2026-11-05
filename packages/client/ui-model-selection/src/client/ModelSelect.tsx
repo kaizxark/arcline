@@ -623,7 +623,32 @@ export function ModelSelect(
                 })}
               </div>
               {state.status === 'ready' && filteredGroups.length === 0 && (
-                <div className={css.empty} role="status">{t(choices.length === 0 ? 'empty.models' : 'search.empty')}</div>
+                <div className={css.empty} role="status">
+                  <div>{t(choices.length === 0 ? 'empty.models' : 'search.empty')}</div>
+                  {choices.length === 0 && (
+                    <button
+                      type="button"
+                      style={{
+                        marginTop: '8px',
+                        padding: '4px 8px',
+                        fontSize: '12px',
+                        color: 'var(--dsw-alias-brand-primary, #6366f1)',
+                        background: 'transparent',
+                        border: '1px solid var(--dsw-alias-border-l3, rgba(255, 255, 255, 0.1))',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontWeight: 500,
+                      }}
+                      onClick={() => {
+                        setOpen(false)
+                        const settingsBtn = document.querySelector<HTMLElement>('[data-sidebar-button="settings"]')
+                        settingsBtn?.click()
+                      }}
+                    >
+                      + Add Model Provider
+                    </button>
+                  )}
+                </div>
               )}
             </>
           )}

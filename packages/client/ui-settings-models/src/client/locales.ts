@@ -130,7 +130,7 @@ export const en = {
   create: 'Create provider',
   creating: 'Creating\u2026',
   welcomeTitle: 'Preview Notice',
-  welcomeBody: 'ARCline 0.2 is still in preview, and many areas need continued improvement and refinement. We welcome feedback and suggestions from all developers and users. The new desktop app now targets a broad range of users, while developer-related advanced features can be enabled in the settings. ARCline’s product features and plugin APIs are expected to continue rapid iteration and evolution, and will gradually stabilize over time.\n\nWe look forward to exploring the limits of intelligence together with users and developers around the world, building on open-source, reusable, and composable infrastructure. We welcome everyone to bring their ideas to life with ARCline and participate in the community to enrich the plugin ecosystem.',
+  welcomeBody: 'ARCline v0.4 is an autonomous agent coding studio. Connect any OpenAI- or Anthropic-compatible model endpoint or provider to get started.\n\nWe welcome feedback and suggestions from developers and users around the world. Product features and plugin APIs continue rapid iteration and evolution.\n\nWe look forward to exploring the limits of autonomous agents together on open-source, reusable, and composable infrastructure.',
   welcomeContinue: 'Continue',
   welcomeError: 'The acknowledgement could not be saved. Please try again.',
   onboardingTitle: 'Add an API key to get started',

@@ -26,6 +26,9 @@ export function BrandWordmark({ size = 24, className }: BrandWordmarkProps) {
         fontFamily: 'Inter, system-ui, sans-serif',
         userSelect: 'none',
         lineHeight: 1,
+        whiteSpace: 'nowrap',
+        flexWrap: 'nowrap',
+        flexShrink: 0,
       }}
       aria-hidden="true"
     >

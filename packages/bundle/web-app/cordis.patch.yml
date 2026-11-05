@@ -138,6 +138,7 @@
 
     - id: account-controller
       name: '@deepseek-ai/dsh-api-account-controller'
+      disabled: true
 
     - id: settings-controller
       name: '@deepseek-ai/dsh-api-settings-controller'
@@ -284,10 +285,10 @@
     - id: ui-sidebar-documentpreview
       name: '@deepseek-ai/dsh-client-ui-sidebar-documentpreview'
 
-    # Web profiles opt in; Desktop retains sandboxed HTTP(S) Browser tabs.
+    # In ARCline web, retain sandboxed HTTP(S) Browser tabs in right sidebar.
     - id: ui-sidebar-browser
       name: '@deepseek-ai/dsh-client-ui-sidebar-browser'
-      disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"
+      disabled: false
 
     - id: ui-sidebar-terminal
       name: '@deepseek-ai/dsh-client-ui-sidebar-terminal'
@@ -309,6 +310,13 @@
     # Without a profile-backed Host it reports itself unavailable.
     - id: ui-plugin-manager
       name: '@deepseek-ai/dsh-client-ui-plugin-manager'
+
+    - id: plugin-market
+      name: '@deepseek-ai/dsh-plugin-market'
+      disabled: !!js "!ctx.get('profileContext')"
+
+    - id: ui-plugin-market
+      name: '@deepseek-ai/dsh-client-ui-plugin-market'
 
     # Read-only Plugin list tab in the Settings Plugins section; the built-in
     # bundles the sidebar page leaves out are inspected here.
