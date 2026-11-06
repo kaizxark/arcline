@@ -3,6 +3,7 @@
 
 import { useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
+import clsx from 'clsx'
 import {
   IconChevronDownOutlineRegular, IconFolderCloseRegular, IconFolderOpenRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -169,9 +170,13 @@ export function HeroShell({ t, renderSlot, children }: HeroShellProps) {
 export function HeroSuggestions() {
   const handleInsert = (text: string) => {
     const el = document.querySelector<HTMLElement>('[data-composer-input="true"]')
-    if (el) {
+    if (el && el.getAttribute('contenteditable') !== 'false') {
       el.focus()
       document.execCommand('insertText', false, text)
+    } else {
+      // If composer is still inert/unselected, trigger the workspace picker
+      const wsBtn = document.querySelector<HTMLButtonElement>('button[aria-label="Choose workspace"]')
+      wsBtn?.click()
     }
   }
 
@@ -186,24 +191,28 @@ export function HeroSuggestions() {
   const actionCards = [
     {
       icon: '⚡',
+      accent: 'purple',
       title: 'Explore Architecture',
       desc: 'Map codebase structure, key dependencies, and system entrypoints',
       prompt: 'Explain the architecture of this project, including directory structure, main dependencies, and entrypoints.',
     },
     {
       icon: '🛠️',
+      accent: 'blue',
       title: 'Build a Feature',
       desc: 'Plan, implement, and verify new capabilities with tests',
       prompt: 'I want to build a new feature. Please help me plan the implementation steps, write clean code, and verify it.',
     },
     {
       icon: '🐞',
+      accent: 'rose',
       title: 'Debug & Fix Errors',
       desc: 'Diagnose runtime exceptions, failing tests, or unexpected bugs',
       prompt: 'Help me diagnose and fix an issue or test failure in this workspace.',
     },
     {
       icon: '🧪',
+      accent: 'emerald',
       title: 'Test & Refactor',
       desc: 'Increase test coverage, clean up technical debt, and optimize performance',
       prompt: 'Review this project for test coverage and suggest unit tests, optimizations, or refactoring opportunities.',
@@ -238,8 +247,9 @@ export function HeroSuggestions() {
             onClick={() => { handleInsert(card.prompt) }}
           >
             <div className={css.cardHeader}>
-              <span className={css.cardIcon}>{card.icon}</span>
+              <span className={clsx(css.cardIcon, css[card.accent])}>{card.icon}</span>
               <span className={css.cardTitle}>{card.title}</span>
+              <span className={css.cardArrow} aria-hidden="true">→</span>
             </div>
             <div className={css.cardDesc}>{card.desc}</div>
           </button>

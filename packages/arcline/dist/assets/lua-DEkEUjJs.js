@@ -1,0 +1,1 @@
+import{t as e}from"./langs/lua-DjuecEsk.js";export{e as default};

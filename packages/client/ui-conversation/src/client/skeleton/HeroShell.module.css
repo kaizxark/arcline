@@ -341,8 +341,35 @@
 }
 
 .cardIcon {
-  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 15px;
   line-height: 1;
+  flex-shrink: 0;
+}
+
+.purple {
+  background: rgba(99, 102, 241, 0.12);
+  border: 0.5px solid rgba(99, 102, 241, 0.25);
+}
+
+.blue {
+  background: rgba(56, 189, 248, 0.12);
+  border: 0.5px solid rgba(56, 189, 248, 0.25);
+}
+
+.rose {
+  background: rgba(244, 63, 94, 0.12);
+  border: 0.5px solid rgba(244, 63, 94, 0.25);
+}
+
+.emerald {
+  background: rgba(52, 211, 153, 0.12);
+  border: 0.5px solid rgba(52, 211, 153, 0.25);
 }
 
 .cardTitle {
@@ -350,6 +377,21 @@
   font-weight: 600;
   line-height: 18px;
   color: var(--dsw-alias-label-primary);
+}
+
+.cardArrow {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--dsw-alias-label-caption);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: all 0.18s ease-in-out;
+}
+
+.starterCard:hover .cardArrow {
+  opacity: 1;
+  transform: translateX(0);
+  color: var(--dsw-alias-brand-primary, #6366f1);
 }
 
 .cardDesc {

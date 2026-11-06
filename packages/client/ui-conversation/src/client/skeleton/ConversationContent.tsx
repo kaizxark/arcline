@@ -83,6 +83,19 @@ export function ConversationContent(props: ConversationContentProps) {
     }
   }, [pendingWorkspaceId, sessionWorkspace?.workspaceId, workspaces.phase, pendingWorkspace])
 
+  // On cold start with no session, automatically connect to the first workspace if available
+  useEffect(() => {
+    if (sessionId === undefined && workspaces.phase === 'ready' && workspaces.items.length > 0 && pendingWorkspaceId === undefined) {
+      const first = workspaces.items[0]
+      if (first) {
+        setPendingWorkspaceId(first.workspaceId)
+        void selectWorkspace(first.workspaceId).catch(() => {
+          setPendingWorkspaceId(undefined)
+        })
+      }
+    }
+  }, [sessionId, workspaces.phase, workspaces.items, pendingWorkspaceId, selectWorkspace])
+
   const zone: InputZone | undefined =
     session === undefined || inputState === undefined ? undefined : { session, input: inputState }
 

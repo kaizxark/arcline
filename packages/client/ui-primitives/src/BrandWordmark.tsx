@@ -32,8 +32,7 @@ export function BrandWordmark({ size = 24, className }: BrandWordmarkProps) {
       }}
       aria-hidden="true"
     >
-      <span style={{ color: 'var(--dsw-alias-brand-primary, #6366f1)' }}>ARC</span>
-      <span>line</span>
+      <span style={{ color: 'var(--dsw-alias-brand-primary, #6366f1)' }}>ARC</span><span>line</span>
     </span>
   )
 }
