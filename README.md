@@ -1,6 +1,37 @@
-# Arcline
+# ARCline
 
-A high-performance terminal AI agent. Built for developers who want a fast, clean, and extensible AI interface in their terminal.
+ARCline is a terminal AI agent exploring a practical question: how can an LLM work with more information than fits comfortably in its context window?
+
+The project treats local storage as an external context layer. Instead of keeping every session detail in the model prompt, ARCline can preserve session state on the local machine, compact older conversation history, and keep the most relevant recent context available to the agent.
+
+ARCline is an early stage, work in progress. The long term goal is a fast, local first context system that can decide what to retain, how to organize it, and what to retrieve for a given task.
+
+## Why ARCline?
+
+LLM context windows are useful, but they are not the same as durable memory. Long running projects create more information than can be sent with every request, including:
+
+- Previous conversations and decisions
+- Project instructions and conventions
+- Files that have already been inspected
+- Tool results and command output
+- Repeated background information that does not belong in every prompt
+
+ARCline explores separating durable local context from the smaller working context sent to a model.
+
+## Current capabilities
+
+The current release provides the foundation for this direction:
+
+- Interactive terminal sessions with streaming model responses
+- OpenAI compatible provider support
+- Local session persistence under `~/.config/arcline/sessions`
+- Context usage estimation and configurable compaction thresholds
+- Conversation compaction that preserves system instructions and recent messages
+- Project instruction discovery through `ARCLINE.md`, `CLAUDE.md`, or `.arcline/instructions.md`
+- Filesystem, shell, and Git tools with permission checks
+- Configurable model, provider, working directory, and iteration limits
+
+The retrieval and memory layer is still evolving. At this stage, ARCline should be understood as an experimental foundation rather than a finished long term memory system.
 
 ## Installation
 
@@ -8,104 +39,119 @@ A high-performance terminal AI agent. Built for developers who want a fast, clea
 npm install -g arcline
 ```
 
-Then simply run:
+Then start an interactive session:
 
 ```bash
 arcline
 ```
-
-You'll see a beautiful retro-style banner and be guided through model selection.
 
 ## Usage
 
-### Start a Session
+### Start a session
 
 ```bash
 arcline
 ```
 
-On first run, you'll see the ARCLINE banner, then be prompted to select a model from discovered models or enter a custom model ID.
-
-### Configure Provider
+### Configure a provider
 
 ```bash
 arcline config
 ```
 
-### List Available Models
+ARCline currently targets OpenAI compatible APIs. During configuration, provide:
+
+1. A base URL, such as `https://api.openai.com/v1`, `https://api.deepseek.com/v1`, or `https://openrouter.ai/api/v1`
+2. An API key
+3. A model ID, selected from discovered models or entered manually
+
+### List available models
 
 ```bash
 arcline models
 ```
 
-### Help & Version
+### Help and version
 
 ```bash
 arcline --help
 arcline --version
 ```
 
-### Debug Mode
+### Debug mode
 
 ```bash
 arcline --debug
 ```
 
+## Project instructions
+
+ARCline checks the working directory for project specific instructions in this order:
+
+1. `ARCLINE.md`
+2. `CLAUDE.md`
+3. `.arcline/instructions.md`
+
+These files provide durable project context without requiring the same instructions to be pasted into every conversation.
+
 ## Configuration
 
-Arcline stores configuration in your platform's standard config directory:
+ARCline stores configuration in the platform standard config directory:
 
-- **Linux/macOS**: `~/.config/arcline-nodejs/config.json`
-- **Windows**: `%APPDATA%\arcline-nodejs\config.json`
+- Linux and macOS: `~/.config/arcline-nodejs/config.json`
+- Windows: `%APPDATA%\\arcline-nodejs\\config.json`
 
-### Provider Setup
-
-Run `arcline config` and enter:
-
-1. **Base URL** - Your OpenAI-compatible API endpoint
-   - Examples: `https://api.openai.com/v1`, `https://api.deepseek.com/v1`, `https://openrouter.ai/api/v1`
-2. **API Key** - Your provider API key
-3. **Model** - Select from discovered models or enter manually
-
-### Environment Variables
-
-For CI/headless environments:
+For CI or headless environments, configure the provider with environment variables:
 
 ```bash
 export ARCLINE_BASE_URL=https://api.example.com/v1
 export ARCLINE_API_KEY=your-api-key
 export ARCLINE_MODEL=your-model
-export ARCLINE_DEBUG=1  # Enable debug mode
+export ARCLINE_DEBUG=1
 ```
 
 Environment variables take precedence over stored configuration.
 
-## Supported APIs
-
-v0.1 targets **OpenAI-compatible APIs**. This includes:
-
-- OpenAI
-- DeepSeek
-- OpenRouter
-- Any API implementing the OpenAI `/v1/chat/completions` and `/v1/models` endpoints
-
-## Session Commands
+## Session commands
 
 During an interactive session:
 
 | Command | Description |
-|---------|-------------|
+| --- | --- |
 | `/exit`, `/quit` | Exit the session |
 | `/clear` | Clear conversation history |
-| `/model` | Switch to a different model (shows model selector) |
-| `/config` | Reconfigure provider |
+| `/model` | Switch models |
+| `/config` | Reconfigure the provider |
 | `/help` | Show session help |
+
+## Architecture
+
+ARCline is organized around a few small layers:
+
+- **CLI**: command parsing and terminal entry points
+- **Agent**: orchestration, tool calls, permissions, and run state
+- **Context**: token estimation, session persistence, project instructions, and compaction
+- **Providers**: OpenAI compatible model discovery, requests, and streaming
+- **Tools**: filesystem, shell, and Git capabilities
+- **UI**: terminal rendering and interactive prompts
+
+The context layer is the main area of exploration. Future work will focus on durable artifacts, better retrieval, relevance ranking, summaries, and explicit controls for what is stored locally.
+
+## Roadmap
+
+- Improve context compaction and summarization
+- Add searchable local memory and relevance based retrieval
+- Persist durable project facts separately from transient conversation history
+- Track references between sessions, files, decisions, and tool results
+- Add stronger privacy controls and storage inspection commands
+- Support more providers, local models, and MCP integrations
+- Continue improving the terminal agent experience
 
 ## Development
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 20 or newer
 - npm
 
 ### Setup
@@ -119,69 +165,12 @@ npm install
 ### Commands
 
 ```bash
-npm run dev      # Run in development mode
-npm run build    # Build for production
-npm run test     # Run tests
-npm run lint     # Run linter
+npm run dev
+npm run build
+npm run test
+npm run lint
 ```
-
-### Project Structure
-
-```
-arcline/
-├── src/
-│   ├── cli/           # CLI entry point & commands
-│   ├── config/        # Configuration management
-│   ├── core/          # Core types & interfaces
-│   ├── providers/     # Provider abstraction layer
-│   │   ├── openai-compatible/
-│   │   └── provider.ts
-│   ├── session/       # Conversation session management
-│   ├── ui/            # Terminal UI components
-│   └── index.ts       # Main exports
-├── tests/             # Test suite
-├── package.json
-├── tsconfig.json
-└── README.md
-```
-
-## Architecture
-
-### Provider Abstraction
-
-Arcline uses a provider abstraction that isolates API communication:
-
-```typescript
-interface Provider {
-  name: string;
-  listModels(config: ProviderConfig): Promise<Model[]>;
-  chat(config: ProviderConfig, request: ChatCompletionRequest): Promise<ChatCompletionResponse>;
-  stream(config: ProviderConfig, request: ChatCompletionRequest): AsyncIterable<StreamChunk>;
-}
-```
-
-This allows adding new providers (Anthropic, Gemini, Ollama, etc.) without rewriting the CLI.
-
-### Core Components
-
-- **CLI** - Command parsing, argument handling
-- **Config** - Cross-platform configuration storage (using `conf`)
-- **Provider Registry** - Manages provider implementations
-- **Session** - Conversation state & message history
-- **UI** - Terminal rendering, streaming output, prompts
-
-## Roadmap
-
-Arcline will evolve into a full terminal coding agent with:
-
-- Repository reading & context management
-- File modification & code execution
-- Tool system & agent loops
-- Model routing & VRAM-aware selection
-- Local model support (Ollama, LM Studio)
-- MCP/tool integrations
-- Autonomous coding workflows
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT
